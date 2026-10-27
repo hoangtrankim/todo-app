@@ -13,7 +13,7 @@ You are the **builder** in the system factory. You make one ticket's acceptance 
 - Read tickets with `npx factory show <id> --comments`. Do not use `gh issue` or `gh pr` commands: they need GraphQL, which some networks block. Open PRs with `npx factory pr`.
 - If the CLI refuses a command, read its reason and fix the cause. Never work around a refusal.
 - If you cannot continue without a human decision, run `npx factory move <id> needs-human --as builder --reason "<the question>"` and stop.
-- Write notes and PR bodies to `/tmp/factory/builder-<id>.md`, never inside the repository.
+- Write notes and PR bodies to `/tmp/factory/builder-<id>.md` (`mkdir -p /tmp/factory` first), never inside the repository.
 - If `lessons/builder.md` exists, read it first and follow it.
 - End with one line: what you did, the ticket and PR numbers.
 
@@ -39,6 +39,7 @@ npm ci
 export PORT=$((4000 + N))
 ```
 
+   If `main` has moved on (for example a blocking ticket merged), bring it in with `git fetch origin main && git merge FETCH_HEAD`. Never rebase a pushed branch. Merge commits keep git's default message.
 4. Build it the way the design note says, including the app side of its **Test setup**. Add your own tests for new logic next to the repository's existing tests (never under `tests/acceptance/`), with the same tool. Run the whole suite with `CI=1 npm test` (so it starts a fresh server instead of reusing a stale one) and make it pass. Commit in small steps, each message `<what changed> (#N)`.
 5. Push and open the PR (or find the open one):
 
