@@ -9,14 +9,42 @@ const list = document.getElementById('todo-list');
 
 let todos = [];
 
-// One <li> per todo. Later tickets add the done checkbox and Delete button here.
+// One <li> per todo: a checkbox labelled by the todo's text. Later tickets add the Delete button here.
 function renderTodo(todo) {
   const li = document.createElement('li');
   li.dataset.id = todo.id;
+  const label = document.createElement('label');
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = todo.done;
+  checkbox.addEventListener('change', () => setDone(todo, checkbox.checked));
   const text = document.createElement('span');
+  text.className = 'todo-text';
+  text.classList.toggle('done', todo.done);
   text.textContent = todo.text;
-  li.append(text);
+  label.append(checkbox, ' ', text);
+  li.append(label);
   return li;
+}
+
+// Save the new state; the page re-renders from the stored todo, or from the old one on failure.
+async function setDone(todo, done) {
+  try {
+    const res = await fetch(`/api/todos/${encodeURIComponent(todo.id)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ done }),
+    });
+    if (!res.ok) throw new Error(`PATCH /api/todos/${todo.id} failed: ${res.status}`);
+    const saved = await res.json();
+    todos = todos.map((t) => (t.id === saved.id ? saved : t));
+    render();
+    clearError();
+  } catch (err) {
+    console.error(err);
+    render();
+    showError('Could not update todo');
+  }
 }
 
 function render() {
@@ -49,11 +77,18 @@ form.addEventListener('submit', async (event) => {
     showError(EMPTY_ERROR);
     return;
   }
-  const res = await fetch('/api/todos', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
+  let res;
+  try {
+    res = await fetch('/api/todos', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+  } catch (err) {
+    console.error(err);
+    showError('Could not add todo');
+    return;
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     showError(data.error ?? 'Could not add todo');
