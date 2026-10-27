@@ -8,6 +8,15 @@
   <body>
     <main>
       <h1>Todos</h1>
+      <form id="new-todo-form" novalidate>
+        <label for="new-todo">New todo</label>
+        <input id="new-todo" name="text" type="text" autocomplete="off" />
+        <button type="submit">Add</button>
+      </form>
+      <p id="todo-error" role="alert" hidden></p>
+      <p id="empty-message" hidden>No todos yet</p>
+      <ul id="todo-list" aria-label="Todos" hidden></ul>
     </main>
+    <script type="module" src="app.js"></script>
   </body>
 </html>
