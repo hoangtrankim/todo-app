@@ -1,0 +1,3 @@
+# System factory settings. See https://github.com/hoangtrankim/system-factory
+repo: hoangtrankim/todo-app
+maxRounds: 3

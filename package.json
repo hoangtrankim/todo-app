@@ -1,0 +1,17 @@
+{
+  "name": "todo-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sample app built by the system factory.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "playwright test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}
