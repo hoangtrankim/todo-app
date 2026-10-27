@@ -110,20 +110,36 @@ async function handleTodos(req, res) {
   sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'GET, POST' });
 }
 
+// The file is hand-editable, so skip entries that are not objects (e.g. null).
+function isTodo(t) {
+  return typeof t === 'object' && t !== null;
+}
+
 async function handleTodo(req, res, id) {
   if (req.method === 'PATCH') {
     const body = await readJsonObject(req);
     if (typeof body.done !== 'boolean') throw new HttpError(400, 'done must be true or false');
     // Throwing inside the update skips the write, so an unknown id changes nothing.
     const todo = await updateTodos((todos) => {
-      const found = todos.find((t) => t.id === id);
+      const found = todos.find((t) => isTodo(t) && t.id === id);
       if (!found) throw new HttpError(404, 'Todo not found');
       found.done = body.done;
       return found;
     });
     return sendJson(res, 200, todo);
   }
-  sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'PATCH' });
+  if (req.method === 'DELETE') {
+    // The body is never read. Only the todo with this exact id is removed; an
+    // unknown id throws, which skips the write.
+    await updateTodos((todos) => {
+      const index = todos.findIndex((t) => isTodo(t) && t.id === id);
+      if (index === -1) throw new HttpError(404, 'Todo not found');
+      todos.splice(index, 1);
+    });
+    res.writeHead(204).end();
+    return;
+  }
+  sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'PATCH, DELETE' });
 }
 
 const TODO_PATH = /^\/api\/todos\/([^/]+)$/;
