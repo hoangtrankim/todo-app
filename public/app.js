@@ -9,7 +9,8 @@ const list = document.getElementById('todo-list');
 
 let todos = [];
 
-// One <li> per todo: a checkbox labelled by the todo's text. Later tickets add the Delete button here.
+// One <li> per todo: a checkbox labelled by the todo's text, then a Delete button
+// outside the label so clicking it never toggles the checkbox.
 function renderTodo(todo) {
   const li = document.createElement('li');
   li.dataset.id = todo.id;
@@ -23,8 +24,20 @@ function renderTodo(todo) {
   text.classList.toggle('done', todo.done);
   text.textContent = todo.text;
   label.append(checkbox, ' ', text);
-  li.append(label);
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'delete';
+  deleteButton.textContent = 'Delete';
+  deleteButton.setAttribute('aria-label', `Delete ${todo.text}`);
+  deleteButton.addEventListener('click', () => deleteTodo(todo));
+  li.append(label, ' ', deleteButton);
   return li;
+}
+
+// render() replaces the list, so put focus back on the matching control of a todo.
+function focusIn(id, selector) {
+  const li = [...list.children].find((el) => el.dataset.id === id);
+  li?.querySelector(selector)?.focus();
 }
 
 // Save the new state; the page re-renders from the stored todo, or from the old one on failure.
@@ -45,6 +58,28 @@ async function setDone(todo, done) {
     render();
     showError('Could not update todo');
   }
+  focusIn(todo.id, 'input[type="checkbox"]');
+}
+
+// Remove the todo once the server confirms; 404 means it is already gone, so drop it too.
+async function deleteTodo(todo) {
+  try {
+    const res = await fetch(`/api/todos/${encodeURIComponent(todo.id)}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) throw new Error(`DELETE /api/todos/${todo.id} failed: ${res.status}`);
+  } catch (err) {
+    console.error(err);
+    showError('Could not delete todo');
+    return;
+  }
+  const index = todos.findIndex((t) => t.id === todo.id);
+  if (index === -1) return;
+  todos.splice(index, 1);
+  render();
+  clearError();
+  // Focus the todo that took its place (or the one before it), or the input if none remain.
+  const next = todos[index] ?? todos[index - 1];
+  if (next) focusIn(next.id, 'button.delete');
+  else input.focus();
 }
 
 function render() {

@@ -67,7 +67,9 @@ test('todo text is rendered as text, not HTML', async ({ page }) => {
   await page.request.post('/api/todos', { data: { text: '<img src=x onerror="window.pwned=1">' } });
   await page.goto('/');
   const list = page.getByRole('list', { name: 'Todos' });
-  await expect(list.getByRole('listitem')).toHaveText(['<img src=x onerror="window.pwned=1">']);
+  await expect(list.locator('.todo-text')).toHaveText(['<img src=x onerror="window.pwned=1">']);
+  // The Delete button's accessible name carries the text too, as an attribute.
+  await expect(list.getByRole('button', { name: 'Delete <img src=x onerror="window.pwned=1">' })).toHaveCount(1);
   await expect(list.locator('img')).toHaveCount(0);
   expect(await page.evaluate(() => window.pwned)).toBeUndefined();
 });
@@ -138,4 +140,57 @@ test('a rejected add fetch shows "Could not add todo" and keeps the input', asyn
   await page.getByRole('button', { name: 'Add' }).click();
   await expect(page.getByRole('alert')).toHaveText('Could not add todo');
   await expect(page.getByLabel('New todo')).toHaveValue('Buy milk');
+});
+
+test('DELETE finds an id that needs URL encoding', async ({ request }) => {
+  await writeFile(TODOS_FILE, JSON.stringify([{ id: 'a b/c', text: 'Buy milk', done: false }]));
+  const res = await request.delete(`/api/todos/${encodeURIComponent('a b/c')}`);
+  expect(res.status()).toBe(204);
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual([]);
+});
+
+test('DELETE with a malformed percent-encoded id returns 404 and writes nothing', async ({ request }) => {
+  await writeFile(TODOS_FILE, '[]');
+  const res = await request.delete('/api/todos/%E0%A4%A');
+  expect(res.status()).toBe(404);
+  expect(await readFile(TODOS_FILE, 'utf8')).toBe('[]');
+});
+
+test('PATCH and DELETE skip null entries in the storage file', async ({ request }) => {
+  await writeFile(TODOS_FILE, JSON.stringify([null, { id: 'a', text: 'Buy milk', done: false }]));
+  expect((await request.patch('/api/todos/a', { data: { done: true } })).status()).toBe(200);
+  expect((await request.delete('/api/todos/a')).status()).toBe(204);
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual([null]);
+});
+
+test('concurrent DELETEs and a POST keep every other change', async ({ request }) => {
+  const ids = Array.from({ length: 6 }, (_, i) => `t${i}`);
+  await writeFile(TODOS_FILE, JSON.stringify(ids.map((id) => ({ id, text: id, done: false }))));
+  const results = await Promise.all([
+    ...['t1', 't3', 't5'].map((id) => request.delete(`/api/todos/${id}`)),
+    request.post('/api/todos', { data: { text: 'new' } }),
+  ]);
+  expect(results.map((r) => r.status())).toEqual([204, 204, 204, 201]);
+  const stored = await (await request.get('/api/todos')).json();
+  expect(stored.map((t) => t.text)).toEqual(['t0', 't2', 't4', 'new']);
+});
+
+test('after a delete, focus moves to the next Delete button, or the input when none remain', async ({ page }) => {
+  await writeFile(TODOS_FILE, JSON.stringify([
+    { id: 'a', text: 'Buy milk', done: false },
+    { id: 'b', text: 'Walk dog', done: false },
+  ]));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Delete Buy milk' }).click();
+  await expect(page.getByRole('button', { name: 'Delete Walk dog' })).toBeFocused();
+  await page.getByRole('button', { name: 'Delete Walk dog' }).click();
+  await expect(page.getByLabel('New todo')).toBeFocused();
+});
+
+test('after toggling, focus stays on the todo\'s checkbox', async ({ page }) => {
+  await writeFile(TODOS_FILE, JSON.stringify([{ id: 'a', text: 'Buy milk', done: false }]));
+  await page.goto('/');
+  await page.getByRole('checkbox', { name: 'Buy milk' }).click();
+  await expect(page.getByRole('checkbox', { name: 'Buy milk' })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Buy milk' })).toBeFocused();
 });

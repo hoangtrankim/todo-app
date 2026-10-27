@@ -21,30 +21,34 @@ const input = (page) => page.getByLabel('New todo');
 const addButton = (page) => page.getByRole('button', { name: 'Add' });
 const todoList = (page) => page.getByRole('list', { name: 'Todos' });
 const todoItems = (page) => todoList(page).getByRole('listitem');
+// A list item's text is the todo text, plus "Delete" once #4 adds a Delete button to each item.
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const item = (text: string) => new RegExp(`^\\s*${escapeRegExp(text)}\\s*(Delete)?\\s*$`);
+const items = (texts: string[]) => texts.map(item);
 
 test.describe('UI', () => {
   test('AC-1: typing "Buy milk" and pressing Add appends it and clears the input', async ({ page }) => {
     await page.request.post('/api/todos', { data: { text: 'Walk dog' } });
     await page.goto('/');
-    await expect(todoItems(page)).toHaveText(['Walk dog']);
+    await expect(todoItems(page)).toHaveText(items(['Walk dog']));
 
     await input(page).fill('Buy milk');
     await addButton(page).click();
 
-    await expect(todoItems(page)).toHaveText(['Walk dog', 'Buy milk']);
-    await expect(todoItems(page).last()).toHaveText('Buy milk');
+    await expect(todoItems(page)).toHaveText(items(['Walk dog', 'Buy milk']));
+    await expect(todoItems(page).last()).toHaveText(item('Buy milk'));
     await expect(input(page)).toHaveValue('');
   });
 
   test('AC-1: typing "Buy milk" and pressing Enter appends it and clears the input', async ({ page }) => {
     await page.request.post('/api/todos', { data: { text: 'Walk dog' } });
     await page.goto('/');
-    await expect(todoItems(page)).toHaveText(['Walk dog']);
+    await expect(todoItems(page)).toHaveText(items(['Walk dog']));
 
     await input(page).fill('Buy milk');
     await input(page).press('Enter');
 
-    await expect(todoItems(page)).toHaveText(['Walk dog', 'Buy milk']);
+    await expect(todoItems(page)).toHaveText(items(['Walk dog', 'Buy milk']));
     await expect(input(page)).toHaveValue('');
   });
 
@@ -52,7 +56,7 @@ test.describe('UI', () => {
     await page.goto('/');
     await input(page).fill('Buy milk');
     await addButton(page).click();
-    await expect(todoItems(page)).toHaveText(['Buy milk']);
+    await expect(todoItems(page)).toHaveText(items(['Buy milk']));
 
     const res = await page.request.get('/api/todos');
     const todos = await res.json();
@@ -75,13 +79,13 @@ test.describe('UI', () => {
   test('AC-2: spaces-only input adds nothing and shows "Todo can\'t be empty"', async ({ page }) => {
     await page.request.post('/api/todos', { data: { text: 'Walk dog' } });
     await page.goto('/');
-    await expect(todoItems(page)).toHaveText(['Walk dog']);
+    await expect(todoItems(page)).toHaveText(items(['Walk dog']));
 
     await input(page).fill('    ');
     await addButton(page).click();
 
     await expect(page.getByRole('alert')).toHaveText("Todo can't be empty");
-    await expect(todoItems(page)).toHaveText(['Walk dog']);
+    await expect(todoItems(page)).toHaveText(items(['Walk dog']));
     const todos = await (await page.request.get('/api/todos')).json();
     expect(todos.map((t) => t.text)).toEqual(['Walk dog']);
   });
@@ -94,7 +98,7 @@ test.describe('UI', () => {
     await input(page).fill('Buy milk');
     await addButton(page).click();
 
-    await expect(todoItems(page)).toHaveText(['Buy milk']);
+    await expect(todoItems(page)).toHaveText(items(['Buy milk']));
     await expect(page.getByText("Todo can't be empty")).toBeHidden();
   });
 
@@ -111,14 +115,14 @@ test.describe('UI', () => {
     await input(page).fill('Buy milk');
     await addButton(page).click();
 
-    await expect(todoItems(page)).toHaveText(['Buy milk']);
+    await expect(todoItems(page)).toHaveText(items(['Buy milk']));
     await expect(page.getByText('No todos yet')).toBeHidden();
   });
 
   test('AC-7: "No todos yet" is not shown when the app opens with stored todos', async ({ page }) => {
     await page.request.post('/api/todos', { data: { text: 'Walk dog' } });
     await page.goto('/');
-    await expect(todoItems(page)).toHaveText(['Walk dog']);
+    await expect(todoItems(page)).toHaveText(items(['Walk dog']));
     await expect(page.getByText('No todos yet')).toBeHidden();
   });
 });
