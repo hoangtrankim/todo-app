@@ -71,3 +71,71 @@ test('todo text is rendered as text, not HTML', async ({ page }) => {
   await expect(list.locator('img')).toHaveCount(0);
   expect(await page.evaluate(() => window.pwned)).toBeUndefined();
 });
+
+test('a storage file that is not an array returns 500 and is not overwritten', async ({ request }) => {
+  await writeFile(TODOS_FILE, '{"a":1}');
+  expect((await request.get('/api/todos')).status()).toBe(500);
+  expect((await request.patch('/api/todos/a', { data: { done: true } })).status()).toBe(500);
+  expect(await readFile(TODOS_FILE, 'utf8')).toBe('{"a":1}');
+});
+
+test('PATCH finds an id that needs URL encoding', async ({ request }) => {
+  await writeFile(TODOS_FILE, JSON.stringify([{ id: 'a b/c', text: 'Buy milk', done: false }]));
+  const res = await request.patch(`/api/todos/${encodeURIComponent('a b/c')}`, { data: { done: true } });
+  expect(res.status()).toBe(200);
+  expect(await res.json()).toEqual({ id: 'a b/c', text: 'Buy milk', done: true });
+});
+
+test('PATCH with a malformed percent-encoded id returns 404 and writes nothing', async ({ request }) => {
+  await writeFile(TODOS_FILE, '[]');
+  const res = await request.patch('/api/todos/%E0%A4%A', { data: { done: true } });
+  expect(res.status()).toBe(404);
+  expect(await readFile(TODOS_FILE, 'utf8')).toBe('[]');
+});
+
+test('a PATCH body over 10 KB returns 413 and writes nothing', async ({ request }) => {
+  const seed = JSON.stringify([{ id: 'a', text: 'Buy milk', done: false }]);
+  await writeFile(TODOS_FILE, seed);
+  const res = await request.patch('/api/todos/a', { data: { done: true, pad: 'x'.repeat(11 * 1024) } });
+  expect(res.status()).toBe(413);
+  expect(await readFile(TODOS_FILE, 'utf8')).toBe(seed);
+});
+
+test('concurrent PATCHes on different todos keep every change', async ({ request }) => {
+  const ids = Array.from({ length: 10 }, (_, i) => `t${i}`);
+  await writeFile(TODOS_FILE, JSON.stringify(ids.map((id) => ({ id, text: id, done: false }))));
+  const results = await Promise.all(ids.map((id) => request.patch(`/api/todos/${id}`, { data: { done: true } })));
+  expect(results.map((r) => r.status())).toEqual(ids.map(() => 200));
+  const stored = await (await request.get('/api/todos')).json();
+  expect(stored.map((t) => t.done)).toEqual(ids.map(() => true));
+});
+
+test('/api itself and nested unknown API paths return 404 JSON', async ({ request }) => {
+  for (const url of ['/api', '/api/', '/api/todos/a/extra']) {
+    const res = await request.get(url);
+    expect(res.status(), url).toBe(404);
+    expect(await res.json(), url).toEqual({ error: 'Not found' });
+  }
+});
+
+test('a rejected PATCH fetch puts the checkbox back and shows the error', async ({ page }) => {
+  await writeFile(TODOS_FILE, JSON.stringify([{ id: 'a', text: 'Buy milk', done: false }]));
+  await page.route('**/api/todos/*', (route) =>
+    route.request().method() === 'PATCH' ? route.abort() : route.continue(),
+  );
+  await page.goto('/');
+  await page.getByRole('checkbox', { name: 'Buy milk' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Could not update todo');
+  await expect(page.getByRole('checkbox', { name: 'Buy milk' })).not.toBeChecked();
+});
+
+test('a rejected add fetch shows "Could not add todo" and keeps the input', async ({ page }) => {
+  await page.route('**/api/todos', (route) =>
+    route.request().method() === 'POST' ? route.abort() : route.continue(),
+  );
+  await page.goto('/');
+  await page.getByLabel('New todo').fill('Buy milk');
+  await page.getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Could not add todo');
+  await expect(page.getByLabel('New todo')).toHaveValue('Buy milk');
+});
