@@ -79,9 +79,17 @@ function sendJson(res, status, data, headers = {}) {
   res.end(JSON.stringify(data));
 }
 
+// A cross-site page can only send "simple" content types without a CORS preflight,
+// which this server never answers, so requiring JSON blocks cross-site writes.
+function requireJson(req) {
+  const type = (req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+  if (type !== 'application/json') throw new HttpError(415, 'Content-Type must be application/json');
+}
+
 // The body must be a JSON object; unparsable JSON and non-object JSON (a bare
 // string, number, array or null) are both rejected as invalid.
 async function readJsonObject(req) {
+  requireJson(req);
   const raw = await readBody(req);
   let body;
   try {
@@ -110,9 +118,15 @@ async function handleTodos(req, res) {
   sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'GET, POST' });
 }
 
-// The file is hand-editable, so skip entries that are not plain objects (e.g. null or arrays).
+// The file is hand-editable, so skip entries that are not well-formed todos.
 function isTodo(t) {
-  return typeof t === 'object' && t !== null && !Array.isArray(t);
+  return (
+    typeof t === 'object' &&
+    t !== null &&
+    typeof t.id === 'string' &&
+    typeof t.text === 'string' &&
+    typeof t.done === 'boolean'
+  );
 }
 
 async function handleTodo(req, res, id) {

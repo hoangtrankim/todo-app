@@ -209,3 +209,24 @@ test('an array entry in the storage file is hidden from GET and kept by PATCH an
   expect((await request.delete('/api/todos/b')).status()).toBe(204);
   expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual([a, [1]]);
 });
+
+test('text/plain POST and PATCH return 415 and leave the file unchanged', async ({ request }) => {
+  const stored = JSON.stringify([{ id: 'a', text: 'Buy milk', done: false }]);
+  await writeFile(TODOS_FILE, stored);
+  const headers = { 'content-type': 'text/plain' };
+  const post = await request.post('/api/todos', { headers, data: Buffer.from('{"text":"x"}') });
+  expect(post.status()).toBe(415);
+  expect(await post.json()).toEqual({ error: 'Content-Type must be application/json' });
+  const patch = await request.patch('/api/todos/a', { headers, data: Buffer.from('{"done":true}') });
+  expect(patch.status()).toBe(415);
+  expect(await readFile(TODOS_FILE, 'utf8')).toBe(stored);
+});
+
+test('GET skips malformed entries', async ({ request }) => {
+  const good = { id: '1', text: 'ok', done: false };
+  await writeFile(
+    TODOS_FILE,
+    JSON.stringify([good, { id: 2, text: 'bad', done: false }, { id: '3', text: 'x' }, null]),
+  );
+  expect(await (await request.get('/api/todos')).json()).toEqual([good]);
+});
