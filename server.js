@@ -171,11 +171,23 @@ async function serveStatic(pathname, res) {
   }
 }
 
-export function start(port = Number(process.env.PORT ?? 3000)) {
+// Only localhost / 127.0.0.1 on the port we listen on may reach the API (blocks DNS rebinding).
+function isAllowedHost(hostHeader, port) {
+  const match = /^(localhost|127\.0\.0\.1):(\d+)$/.exec((hostHeader ?? '').toLowerCase());
+  return match !== null && Number(match[2]) === port;
+}
+
+function listeningPort(server) {
+  const address = server.address();
+  return typeof address === 'object' && address !== null ? address.port : undefined;
+}
+
+export function start(port = Number(process.env.PORT ?? 3000), host = process.env.HOST ?? '127.0.0.1') {
   const server = createServer(async (req, res) => {
     const { pathname } = new URL(req.url ?? '/', 'http://x');
     if (pathname !== '/api' && !pathname.startsWith('/api/')) return serveStatic(pathname, res);
     try {
+      if (!isAllowedHost(req.headers.host, listeningPort(server))) throw new HttpError(403, 'Forbidden host');
       await handleApi(req, res, pathname);
     } catch (err) {
       if (err instanceof HttpError) {
@@ -186,7 +198,7 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
       sendJson(res, 500, { error: 'Internal server error' });
     }
   });
-  return new Promise((resolveServer) => server.listen(port, () => resolveServer(server)));
+  return new Promise((resolveServer) => server.listen(port, host, () => resolveServer(server)));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
