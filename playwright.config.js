@@ -6,7 +6,8 @@ const port = Number(process.env.PORT ?? 3000);
 
 // Tests use their own storage file, never the real data/todos.json. Setting it on
 // process.env here also makes it visible to the test files, which reset it per test.
-process.env.TODOS_FILE ??= path.join(os.tmpdir(), 'todo-app-test', 'todos.json');
+// The default is per PORT, so runs on different ports do not share (and reset) one file.
+process.env.TODOS_FILE ??= path.join(os.tmpdir(), `todo-app-test-${port}`, 'todos.json');
 
 export default defineConfig({
   testDir: 'tests',
