@@ -110,9 +110,9 @@ async function handleTodos(req, res) {
   sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'GET, POST' });
 }
 
-// The file is hand-editable, so skip entries that are not objects (e.g. null).
+// The file is hand-editable, so skip entries that are not plain objects (e.g. null or arrays).
 function isTodo(t) {
-  return typeof t === 'object' && t !== null;
+  return typeof t === 'object' && t !== null && !Array.isArray(t);
 }
 
 async function handleTodo(req, res, id) {
