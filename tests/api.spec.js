@@ -195,3 +195,17 @@ test("after toggling, focus stays on the todo's checkbox", async ({ page }) => {
   await expect(page.getByRole('checkbox', { name: 'Buy milk' })).toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Buy milk' })).toBeFocused();
 });
+
+test('an array entry in the storage file is hidden from GET and kept by PATCH and DELETE', async ({ request }) => {
+  const a = { id: 'a', text: 'A', done: false };
+  const b = { id: 'b', text: 'B', done: false };
+  await writeFile(TODOS_FILE, JSON.stringify([a, [1], b]));
+  expect(await (await request.get('/api/todos')).json()).toEqual([a, b]);
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual([a, [1], b]);
+
+  expect((await request.patch('/api/todos/b', { data: { done: true } })).status()).toBe(200);
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual([a, [1], { ...b, done: true }]);
+
+  expect((await request.delete('/api/todos/b')).status()).toBe(204);
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual([a, [1]]);
+});
