@@ -6,4 +6,5 @@ A sample todo app built by the [system factory](https://github.com/hoangtrankim/
 npm install
 npm start      # http://localhost:3000
 npm test       # Playwright
+npm run check  # lint, format, types, tests + coverage floor (what CI runs)
 ```

@@ -16,7 +16,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm test
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      # Runs the whole Playwright suite and fails below 80% line coverage of server.js.
+      - run: npm run test:coverage
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -25,4 +29,5 @@ jobs:
           path: |
             playwright-report/
             test-results/
+            coverage/
           retention-days: 30

@@ -71,7 +71,7 @@ test('todo text is rendered as text, not HTML', async ({ page }) => {
   // The Delete button's accessible name carries the text too, as an attribute.
   await expect(list.getByRole('button', { name: 'Delete <img src=x onerror="window.pwned=1">' })).toHaveCount(1);
   await expect(list.locator('img')).toHaveCount(0);
-  expect(await page.evaluate(() => window.pwned)).toBeUndefined();
+  expect(await page.evaluate(() => /** @type {any} */ (globalThis).pwned)).toBeUndefined();
 });
 
 test('a storage file that is not an array returns 500 and is not overwritten', async ({ request }) => {
@@ -132,9 +132,7 @@ test('a rejected PATCH fetch puts the checkbox back and shows the error', async 
 });
 
 test('a rejected add fetch shows "Could not add todo" and keeps the input', async ({ page }) => {
-  await page.route('**/api/todos', (route) =>
-    route.request().method() === 'POST' ? route.abort() : route.continue(),
-  );
+  await page.route('**/api/todos', (route) => (route.request().method() === 'POST' ? route.abort() : route.continue()));
   await page.goto('/');
   await page.getByLabel('New todo').fill('Buy milk');
   await page.getByRole('button', { name: 'Add' }).click();
@@ -176,10 +174,13 @@ test('concurrent DELETEs and a POST keep every other change', async ({ request }
 });
 
 test('after a delete, focus moves to the next Delete button, or the input when none remain', async ({ page }) => {
-  await writeFile(TODOS_FILE, JSON.stringify([
-    { id: 'a', text: 'Buy milk', done: false },
-    { id: 'b', text: 'Walk dog', done: false },
-  ]));
+  await writeFile(
+    TODOS_FILE,
+    JSON.stringify([
+      { id: 'a', text: 'Buy milk', done: false },
+      { id: 'b', text: 'Walk dog', done: false },
+    ]),
+  );
   await page.goto('/');
   await page.getByRole('button', { name: 'Delete Buy milk' }).click();
   await expect(page.getByRole('button', { name: 'Delete Walk dog' })).toBeFocused();
@@ -187,7 +188,7 @@ test('after a delete, focus moves to the next Delete button, or the input when n
   await expect(page.getByLabel('New todo')).toBeFocused();
 });
 
-test('after toggling, focus stays on the todo\'s checkbox', async ({ page }) => {
+test("after toggling, focus stays on the todo's checkbox", async ({ page }) => {
   await writeFile(TODOS_FILE, JSON.stringify([{ id: 'a', text: 'Buy milk', done: false }]));
   await page.goto('/');
   await page.getByRole('checkbox', { name: 'Buy milk' }).click();

@@ -191,4 +191,6 @@ export function start(port = Number(process.env.PORT ?? 3000)) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   start().then((s) => console.log(`Listening on http://localhost:${s.address().port}`));
+  // Exit cleanly on a stop signal so Node writes test coverage (NODE_V8_COVERAGE) before it quits.
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => process.exit(0));
 }

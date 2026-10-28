@@ -1,0 +1,9 @@
+tests/acceptance/
+playwright-report/
+test-results/
+coverage/
+data/
+package-lock.json
+.claude/
+*.md
+*.yml
