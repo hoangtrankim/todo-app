@@ -1,0 +1,4268 @@
+{
+  "config": {
+    "argv": [
+      "/opt/hostedtoolcache/node/22.23.3/x64/bin/node",
+      "/home/runner/work/todo-app/todo-app/node_modules/.bin/playwright",
+      "test"
+    ],
+    "configFile": "/home/runner/work/todo-app/todo-app/playwright.config.js",
+    "rootDir": "/home/runner/work/todo-app/todo-app/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "ci": {
+        "commitHref": "https://github.com/hoangtrankim/todo-app/commit/463d74bbadc5f5bc9e141b8456c44b15c5631387",
+        "commitHash": "463d74bbadc5f5bc9e141b8456c44b15c5631387",
+        "prHref": "https://github.com/hoangtrankim/todo-app/pull/16",
+        "prTitle": "Restrict the API to local requests and guard against cross-site deletes",
+        "prBaseHash": "d0c19168f38948cf2c599d395f6f8c6701e83328",
+        "buildHref": "https://github.com/hoangtrankim/todo-app/actions/runs/40653407255"
+      },
+      "gitCommit": {
+        "shortHash": "463d74b",
+        "hash": "463d74bbadc5f5bc9e141b8456c44b15c5631387",
+        "subject": "Merge d45700cfa2b628b75862c97788afdb4f85774a33 into d0c19168f38948cf2c599d395f6f8c6701e83328",
+        "body": "Merge d45700cfa2b628b75862c97788afdb4f85774a33 into d0c19168f38948cf2c599d395f6f8c6701e83328\n",
+        "author": {
+          "name": "hoangtrankim",
+          "email": "hoangtrankim.ai@gmail.com",
+          "time": 1793174237000
+        },
+        "committer": {
+          "name": "GitHub",
+          "email": "noreply@github.com",
+          "time": 1793174237000
+        },
+        "branch": "HEAD"
+      },
+      "gitDiff": "diff --git a/README.md b/README.md\nindex e7c123a..6f5559a 100644\n--- a/README.md\n+++ b/README.md\n@@ -8,3 +8,5 @@ npm start      # http://localhost:3000\n npm test       # Playwright\n npm run check  # lint, format, types, tests + coverage floor (what CI runs)\n ```\n+\n+The server listens on `127.0.0.1` only. Set `HOST` (for example `HOST=0.0.0.0 npm start`) to use another interface. The API still accepts only `Host: localhost:<port>` or `127.0.0.1:<port>`, whatever `HOST` is.\ndiff --git a/server.js b/server.js\nindex 8eca387..a509d32 100644\n--- a/server.js\n+++ b/server.js\n@@ -171,11 +171,23 @@ async function serveStatic(pathname, res) {\n   }\n }\n \n-export function start(port = Number(process.env.PORT ?? 3000)) {\n+// Only localhost / 127.0.0.1 on the port we listen on may reach the API (blocks DNS rebinding).\n+function isAllowedHost(hostHeader, port) {\n+  const match = /^(localhost|127\\.0\\.0\\.1):(\\d+)$/.exec((hostHeader ?? '').toLowerCase());\n+  return match !== null && Number(match[2]) === port;\n+}\n+\n+function listeningPort(server) {\n+  const address = server.address();\n+  return typeof address === 'object' && address !== null ? address.port : undefined;\n+}\n+\n+export function start(port = Number(process.env.PORT ?? 3000), host = process.env.HOST ?? '127.0.0.1') {\n   const server = createServer(async (req, res) => {\n     const { pathname } = new URL(req.url ?? '/', 'http://x');\n     if (pathname !== '/api' && !pathname.startsWith('/api/')) return serveStatic(pathname, res);\n     try {\n+      if (!isAllowedHost(req.headers.host, listeningPort(server))) throw new HttpError(403, 'Forbidden host');\n       await handleApi(req, res, pathname);\n     } catch (err) {\n       if (err instanceof HttpError) {\n@@ -186,7 +198,7 @@ export function start(port = Number(process.env.PORT ?? 3000)) {\n       sendJson(res, 500, { error: 'Internal server error' });\n     }\n   });\n-  return new Promise((resolveServer) => server.listen(port, () => resolveServer(server)));\n+  return new Promise((resolveServer) => server.listen(port, host, () => resolveServer(server)));\n }\n \n if (process.argv[1] === fileURLToPath(import.meta.url)) {\ndiff --git a/tests/acceptance/ticket-8.spec.ts b/tests/acceptance/ticket-8.spec.ts\nnew file mode 100644\nindex 0000000..e798056\n--- /dev/null\n+++ b/tests/acceptance/ticket-8.spec.ts\n@@ -0,0 +1,173 @@\n+import { expect, test } from '@playwright/test';\n+import http from 'node:http';\n+import os from 'node:os';\n+import path from 'node:path';\n+import { mkdir, readFile, writeFile } from 'node:fs/promises';\n+\n+const PORT = Number(process.env.PORT ?? 3000);\n+const TODOS_FILE =\n+  process.env.TODOS_FILE ?? path.join(os.tmpdir(), 'todo-app-test', 'todos.json');\n+\n+type Todo = { id: string; text: string; done: boolean };\n+const SEED: Todo[] = [\n+  { id: 'a', text: 'Buy milk', done: false },\n+  { id: 'b', text: 'Walk dog', done: true },\n+];\n+\n+test.beforeEach(async () => {\n+  await mkdir(path.dirname(TODOS_FILE), { recursive: true });\n+  await writeFile(TODOS_FILE, JSON.stringify(SEED));\n+});\n+\n+type Res = { status: number; headers: http.IncomingHttpHeaders; body: string };\n+\n+// node:http lets us set any Host header (fetch forbids it). host === null sends no Host header.\n+function raw(\n+  method: string,\n+  urlPath: string,\n+  host: string | null,\n+  extra: Record<string, string> = {},\n+  body?: string,\n+): Promise<Res> {\n+  return new Promise((resolve, reject) => {\n+    const headers: Record<string, string> = { ...extra };\n+    if (host !== null) headers.Host = host;\n+    if (body !== undefined) headers['content-type'] = 'application/json';\n+    const req = http.request(\n+      { host: '127.0.0.1', port: PORT, method, path: urlPath, headers, setHost: false },\n+      (res) => {\n+        let data = '';\n+        res.on('data', (c) => (data += c));\n+        res.on('end', () => resolve({ status: res.statusCode!, headers: res.headers, body: data }));\n+      },\n+    );\n+    req.on('error', reject);\n+    if (body !== undefined) req.write(body);\n+    req.end();\n+  });\n+}\n+\n+async function stored(): Promise<Todo[]> {\n+  return JSON.parse(await readFile(TODOS_FILE, 'utf8'));\n+}\n+\n+const GOOD_HOSTS = [`localhost:${PORT}`, `127.0.0.1:${PORT}`, `LOCALHOST:${PORT}`];\n+const BAD_HOSTS = ['evil.example', `evil.example:${PORT}`, 'localhost', `localhost:${PORT + 1}`, `127.0.0.1:${PORT + 1}`];\n+\n+test.describe('AC-5: delete only for the local user', () => {\n+  test('AC-5: foreign Host DELETE is refused with 403 and the todo stays', async () => {\n+    const res = await raw('DELETE', '/api/todos/a', 'evil.example', { Origin: 'http://evil.example' });\n+    expect(res.status).toBe(403);\n+    expect(res.headers['content-type']).toContain('application/json');\n+    expect(JSON.parse(res.body)).toEqual({ error: 'Forbidden host' });\n+    expect(await stored()).toEqual(SEED);\n+  });\n+\n+  for (const host of BAD_HOSTS) {\n+    test(`AC-5: Host \"${host}\" is refused on every method and writes nothing`, async () => {\n+      for (const [method, p, body] of [\n+        ['GET', '/api/todos', undefined],\n+        ['POST', '/api/todos', JSON.stringify({ text: 'Hacked' })],\n+        ['PATCH', '/api/todos/a', JSON.stringify({ done: true })],\n+        ['DELETE', '/api/todos/a', undefined],\n+        ['OPTIONS', '/api/todos', undefined],\n+      ] as const) {\n+        const res = await raw(method, p, host, {}, body);\n+        expect(res.status, `${method} ${p}`).toBe(403);\n+        expect(JSON.parse(res.body)).toEqual({ error: 'Forbidden host' });\n+      }\n+      expect(await stored()).toEqual(SEED);\n+    });\n+  }\n+\n+  test('AC-5: a request with no Host header is refused', async () => {\n+    const res = await raw('DELETE', '/api/todos/a', null, {});\n+    // HTTP/1.1 without Host may be rejected by Node itself (400); either way nothing is deleted.\n+    expect([400, 403]).toContain(res.status);\n+    expect(await stored()).toEqual(SEED);\n+  });\n+\n+  for (const host of GOOD_HOSTS) {\n+    test(`AC-5: Host \"${host}\" can still delete (204) and list`, async () => {\n+      const list = await raw('GET', '/api/todos', host);\n+      expect(list.status).toBe(200);\n+      expect(JSON.parse(list.body)).toEqual(SEED);\n+      const del = await raw('DELETE', '/api/todos/a', host);\n+      expect(del.status).toBe(204);\n+      expect(await stored()).toEqual([SEED[1]]);\n+    });\n+  }\n+\n+  test('AC-5: unknown id with an allowed Host is still 404', async () => {\n+    const res = await raw('DELETE', '/api/todos/nope', `localhost:${PORT}`);\n+    expect(res.status).toBe(404);\n+  });\n+\n+  test('AC-5: static files are not host-checked', async () => {\n+    const res = await raw('GET', '/', 'evil.example');\n+    expect(res.status).toBe(200);\n+  });\n+\n+  test('AC-5: Delete button in the UI still removes the todo at once', async ({ page }) => {\n+    await page.goto('/');\n+    await expect(page.getByText('Buy milk', { exact: true })).toBeVisible();\n+    await page.getByRole('button', { name: 'Delete Buy milk' }).click();\n+    await expect(page.getByText('Buy milk', { exact: true })).toHaveCount(0);\n+    await expect(page.getByText('Walk dog', { exact: true })).toBeVisible();\n+  });\n+\n+  test('AC-5: server is not reachable on a non-loopback interface by default', async () => {\n+    const external = Object.values(os.networkInterfaces())\n+      .flat()\n+      .find((i) => i && i.family === 'IPv4' && !i.internal);\n+    test.skip(!external, 'no non-loopback IPv4 address on this machine');\n+    const err = await new Promise<NodeJS.ErrnoException | null>((resolve) => {\n+      const req = http.request(\n+        { host: external!.address, port: PORT, path: '/api/todos', method: 'GET', timeout: 3000 },\n+        (res) => {\n+          res.resume();\n+          resolve(null);\n+        },\n+      );\n+      req.on('timeout', () => req.destroy(new Error('timeout')));\n+      req.on('error', (e) => resolve(e as NodeJS.ErrnoException));\n+      req.end();\n+    });\n+    expect(err, 'connection to the LAN address should fail').not.toBeNull();\n+  });\n+});\n+\n+test.describe('AC-5: no CORS headers (cross-site deletes stay blocked)', () => {\n+  const cases: [string, string, string | undefined][] = [\n+    ['GET', '/api/todos', undefined],\n+    ['POST', '/api/todos', JSON.stringify({ text: 'New' })],\n+    ['PATCH', '/api/todos/a', JSON.stringify({ done: true })],\n+    ['DELETE', '/api/todos/a', undefined],\n+    ['DELETE', '/api/todos/missing', undefined],\n+    ['OPTIONS', '/api/todos', undefined],\n+    ['OPTIONS', '/api/todos/a', undefined],\n+  ];\n+  for (const [method, p, body] of cases) {\n+    test(`AC-5: ${method} ${p} with a foreign Origin has no Access-Control-* header`, async () => {\n+      const res = await raw(method, p, `localhost:${PORT}`, { Origin: 'http://evil.example' }, body);\n+      const cors = Object.keys(res.headers).filter((h) => h.startsWith('access-control-'));\n+      expect(cors).toEqual([]);\n+    });\n+  }\n+\n+  test('AC-5: preflight for a cross-site DELETE gets no CORS approval', async () => {\n+    const res = await raw('OPTIONS', '/api/todos/a', `localhost:${PORT}`, {\n+      Origin: 'http://evil.example',\n+      'Access-Control-Request-Method': 'DELETE',\n+    });\n+    expect(res.status).toBe(405);\n+    expect(res.headers['allow']).toBeDefined();\n+    expect(res.headers['access-control-allow-origin']).toBeUndefined();\n+  });\n+\n+  test('AC-5: the 403 response carries no Access-Control-* header either', async () => {\n+    const res = await raw('DELETE', '/api/todos/a', 'evil.example', { Origin: 'http://evil.example' });\n+    expect(res.status).toBe(403);\n+    expect(Object.keys(res.headers).filter((h) => h.startsWith('access-control-'))).toEqual([]);\n+  });\n+});",
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/runner/work/todo-app/todo-app/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "ci": {
+            "commitHref": "https://github.com/hoangtrankim/todo-app/commit/463d74bbadc5f5bc9e141b8456c44b15c5631387",
+            "commitHash": "463d74bbadc5f5bc9e141b8456c44b15c5631387",
+            "prHref": "https://github.com/hoangtrankim/todo-app/pull/16",
+            "prTitle": "Restrict the API to local requests and guard against cross-site deletes",
+            "prBaseHash": "d0c19168f38948cf2c599d395f6f8c6701e83328",
+            "buildHref": "https://github.com/hoangtrankim/todo-app/actions/runs/40653407255"
+          },
+          "gitCommit": {
+            "shortHash": "463d74b",
+            "hash": "463d74bbadc5f5bc9e141b8456c44b15c5631387",
+            "subject": "Merge d45700cfa2b628b75862c97788afdb4f85774a33 into d0c19168f38948cf2c599d395f6f8c6701e83328",
+            "body": "Merge d45700cfa2b628b75862c97788afdb4f85774a33 into d0c19168f38948cf2c599d395f6f8c6701e83328\n",
+            "author": {
+              "name": "hoangtrankim",
+              "email": "hoangtrankim.ai@gmail.com",
+              "time": 1793174237000
+            },
+            "committer": {
+              "name": "GitHub",
+              "email": "noreply@github.com",
+              "time": 1793174237000
+            },
+            "branch": "HEAD"
+          },
+          "gitDiff": "diff --git a/README.md b/README.md\nindex e7c123a..6f5559a 100644\n--- a/README.md\n+++ b/README.md\n@@ -8,3 +8,5 @@ npm start      # http://localhost:3000\n npm test       # Playwright\n npm run check  # lint, format, types, tests + coverage floor (what CI runs)\n ```\n+\n+The server listens on `127.0.0.1` only. Set `HOST` (for example `HOST=0.0.0.0 npm start`) to use another interface. The API still accepts only `Host: localhost:<port>` or `127.0.0.1:<port>`, whatever `HOST` is.\ndiff --git a/server.js b/server.js\nindex 8eca387..a509d32 100644\n--- a/server.js\n+++ b/server.js\n@@ -171,11 +171,23 @@ async function serveStatic(pathname, res) {\n   }\n }\n \n-export function start(port = Number(process.env.PORT ?? 3000)) {\n+// Only localhost / 127.0.0.1 on the port we listen on may reach the API (blocks DNS rebinding).\n+function isAllowedHost(hostHeader, port) {\n+  const match = /^(localhost|127\\.0\\.0\\.1):(\\d+)$/.exec((hostHeader ?? '').toLowerCase());\n+  return match !== null && Number(match[2]) === port;\n+}\n+\n+function listeningPort(server) {\n+  const address = server.address();\n+  return typeof address === 'object' && address !== null ? address.port : undefined;\n+}\n+\n+export function start(port = Number(process.env.PORT ?? 3000), host = process.env.HOST ?? '127.0.0.1') {\n   const server = createServer(async (req, res) => {\n     const { pathname } = new URL(req.url ?? '/', 'http://x');\n     if (pathname !== '/api' && !pathname.startsWith('/api/')) return serveStatic(pathname, res);\n     try {\n+      if (!isAllowedHost(req.headers.host, listeningPort(server))) throw new HttpError(403, 'Forbidden host');\n       await handleApi(req, res, pathname);\n     } catch (err) {\n       if (err instanceof HttpError) {\n@@ -186,7 +198,7 @@ export function start(port = Number(process.env.PORT ?? 3000)) {\n       sendJson(res, 500, { error: 'Internal server error' });\n     }\n   });\n-  return new Promise((resolveServer) => server.listen(port, () => resolveServer(server)));\n+  return new Promise((resolveServer) => server.listen(port, host, () => resolveServer(server)));\n }\n \n if (process.argv[1] === fileURLToPath(import.meta.url)) {\ndiff --git a/tests/acceptance/ticket-8.spec.ts b/tests/acceptance/ticket-8.spec.ts\nnew file mode 100644\nindex 0000000..e798056\n--- /dev/null\n+++ b/tests/acceptance/ticket-8.spec.ts\n@@ -0,0 +1,173 @@\n+import { expect, test } from '@playwright/test';\n+import http from 'node:http';\n+import os from 'node:os';\n+import path from 'node:path';\n+import { mkdir, readFile, writeFile } from 'node:fs/promises';\n+\n+const PORT = Number(process.env.PORT ?? 3000);\n+const TODOS_FILE =\n+  process.env.TODOS_FILE ?? path.join(os.tmpdir(), 'todo-app-test', 'todos.json');\n+\n+type Todo = { id: string; text: string; done: boolean };\n+const SEED: Todo[] = [\n+  { id: 'a', text: 'Buy milk', done: false },\n+  { id: 'b', text: 'Walk dog', done: true },\n+];\n+\n+test.beforeEach(async () => {\n+  await mkdir(path.dirname(TODOS_FILE), { recursive: true });\n+  await writeFile(TODOS_FILE, JSON.stringify(SEED));\n+});\n+\n+type Res = { status: number; headers: http.IncomingHttpHeaders; body: string };\n+\n+// node:http lets us set any Host header (fetch forbids it). host === null sends no Host header.\n+function raw(\n+  method: string,\n+  urlPath: string,\n+  host: string | null,\n+  extra: Record<string, string> = {},\n+  body?: string,\n+): Promise<Res> {\n+  return new Promise((resolve, reject) => {\n+    const headers: Record<string, string> = { ...extra };\n+    if (host !== null) headers.Host = host;\n+    if (body !== undefined) headers['content-type'] = 'application/json';\n+    const req = http.request(\n+      { host: '127.0.0.1', port: PORT, method, path: urlPath, headers, setHost: false },\n+      (res) => {\n+        let data = '';\n+        res.on('data', (c) => (data += c));\n+        res.on('end', () => resolve({ status: res.statusCode!, headers: res.headers, body: data }));\n+      },\n+    );\n+    req.on('error', reject);\n+    if (body !== undefined) req.write(body);\n+    req.end();\n+  });\n+}\n+\n+async function stored(): Promise<Todo[]> {\n+  return JSON.parse(await readFile(TODOS_FILE, 'utf8'));\n+}\n+\n+const GOOD_HOSTS = [`localhost:${PORT}`, `127.0.0.1:${PORT}`, `LOCALHOST:${PORT}`];\n+const BAD_HOSTS = ['evil.example', `evil.example:${PORT}`, 'localhost', `localhost:${PORT + 1}`, `127.0.0.1:${PORT + 1}`];\n+\n+test.describe('AC-5: delete only for the local user', () => {\n+  test('AC-5: foreign Host DELETE is refused with 403 and the todo stays', async () => {\n+    const res = await raw('DELETE', '/api/todos/a', 'evil.example', { Origin: 'http://evil.example' });\n+    expect(res.status).toBe(403);\n+    expect(res.headers['content-type']).toContain('application/json');\n+    expect(JSON.parse(res.body)).toEqual({ error: 'Forbidden host' });\n+    expect(await stored()).toEqual(SEED);\n+  });\n+\n+  for (const host of BAD_HOSTS) {\n+    test(`AC-5: Host \"${host}\" is refused on every method and writes nothing`, async () => {\n+      for (const [method, p, body] of [\n+        ['GET', '/api/todos', undefined],\n+        ['POST', '/api/todos', JSON.stringify({ text: 'Hacked' })],\n+        ['PATCH', '/api/todos/a', JSON.stringify({ done: true })],\n+        ['DELETE', '/api/todos/a', undefined],\n+        ['OPTIONS', '/api/todos', undefined],\n+      ] as const) {\n+        const res = await raw(method, p, host, {}, body);\n+        expect(res.status, `${method} ${p}`).toBe(403);\n+        expect(JSON.parse(res.body)).toEqual({ error: 'Forbidden host' });\n+      }\n+      expect(await stored()).toEqual(SEED);\n+    });\n+  }\n+\n+  test('AC-5: a request with no Host header is refused', async () => {\n+    const res = await raw('DELETE', '/api/todos/a', null, {});\n+    // HTTP/1.1 without Host may be rejected by Node itself (400); either way nothing is deleted.\n+    expect([400, 403]).toContain(res.status);\n+    expect(await stored()).toEqual(SEED);\n+  });\n+\n+  for (const host of GOOD_HOSTS) {\n+    test(`AC-5: Host \"${host}\" can still delete (204) and list`, async () => {\n+      const list = await raw('GET', '/api/todos', host);\n+      expect(list.status).toBe(200);\n+      expect(JSON.parse(list.body)).toEqual(SEED);\n+      const del = await raw('DELETE', '/api/todos/a', host);\n+      expect(del.status).toBe(204);\n+      expect(await stored()).toEqual([SEED[1]]);\n+    });\n+  }\n+\n+  test('AC-5: unknown id with an allowed Host is still 404', async () => {\n+    const res = await raw('DELETE', '/api/todos/nope', `localhost:${PORT}`);\n+    expect(res.status).toBe(404);\n+  });\n+\n+  test('AC-5: static files are not host-checked', async () => {\n+    const res = await raw('GET', '/', 'evil.example');\n+    expect(res.status).toBe(200);\n+  });\n+\n+  test('AC-5: Delete button in the UI still removes the todo at once', async ({ page }) => {\n+    await page.goto('/');\n+    await expect(page.getByText('Buy milk', { exact: true })).toBeVisible();\n+    await page.getByRole('button', { name: 'Delete Buy milk' }).click();\n+    await expect(page.getByText('Buy milk', { exact: true })).toHaveCount(0);\n+    await expect(page.getByText('Walk dog', { exact: true })).toBeVisible();\n+  });\n+\n+  test('AC-5: server is not reachable on a non-loopback interface by default', async () => {\n+    const external = Object.values(os.networkInterfaces())\n+      .flat()\n+      .find((i) => i && i.family === 'IPv4' && !i.internal);\n+    test.skip(!external, 'no non-loopback IPv4 address on this machine');\n+    const err = await new Promise<NodeJS.ErrnoException | null>((resolve) => {\n+      const req = http.request(\n+        { host: external!.address, port: PORT, path: '/api/todos', method: 'GET', timeout: 3000 },\n+        (res) => {\n+          res.resume();\n+          resolve(null);\n+        },\n+      );\n+      req.on('timeout', () => req.destroy(new Error('timeout')));\n+      req.on('error', (e) => resolve(e as NodeJS.ErrnoException));\n+      req.end();\n+    });\n+    expect(err, 'connection to the LAN address should fail').not.toBeNull();\n+  });\n+});\n+\n+test.describe('AC-5: no CORS headers (cross-site deletes stay blocked)', () => {\n+  const cases: [string, string, string | undefined][] = [\n+    ['GET', '/api/todos', undefined],\n+    ['POST', '/api/todos', JSON.stringify({ text: 'New' })],\n+    ['PATCH', '/api/todos/a', JSON.stringify({ done: true })],\n+    ['DELETE', '/api/todos/a', undefined],\n+    ['DELETE', '/api/todos/missing', undefined],\n+    ['OPTIONS', '/api/todos', undefined],\n+    ['OPTIONS', '/api/todos/a', undefined],\n+  ];\n+  for (const [method, p, body] of cases) {\n+    test(`AC-5: ${method} ${p} with a foreign Origin has no Access-Control-* header`, async () => {\n+      const res = await raw(method, p, `localhost:${PORT}`, { Origin: 'http://evil.example' }, body);\n+      const cors = Object.keys(res.headers).filter((h) => h.startsWith('access-control-'));\n+      expect(cors).toEqual([]);\n+    });\n+  }\n+\n+  test('AC-5: preflight for a cross-site DELETE gets no CORS approval', async () => {\n+    const res = await raw('OPTIONS', '/api/todos/a', `localhost:${PORT}`, {\n+      Origin: 'http://evil.example',\n+      'Access-Control-Request-Method': 'DELETE',\n+    });\n+    expect(res.status).toBe(405);\n+    expect(res.headers['allow']).toBeDefined();\n+    expect(res.headers['access-control-allow-origin']).toBeUndefined();\n+  });\n+\n+  test('AC-5: the 403 response carries no Access-Control-* header either', async () => {\n+    const res = await raw('DELETE', '/api/todos/a', 'evil.example', { Origin: 'http://evil.example' });\n+    expect(res.status).toBe(403);\n+    expect(Object.keys(res.headers).filter((h) => h.startsWith('access-control-'))).toEqual([]);\n+  });\n+});",
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/home/runner/work/todo-app/todo-app/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "html",
+        {
+          "open": "never"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "test-results/results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 1,
+    "webServer": {
+      "command": "node server.js",
+      "port": 3000,
+      "env": {
+        "PORT": "3000",
+        "TODOS_FILE": "/tmp/todo-app-test-3000/todos.json"
+      },
+      "reuseExistingServer": false,
+      "gracefulShutdown": {
+        "signal": "SIGTERM",
+        "timeout": 5000
+      }
+    }
+  },
+  "suites": [
+    {
+      "title": "acceptance/ticket-10.spec.ts",
+      "file": "acceptance/ticket-10.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "AC-6: default storage file differs per PORT",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 951,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:57:49.612Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "258c6a96a9c03cd38c8e-5ded167b03101a25c504",
+          "file": "acceptance/ticket-10.spec.ts",
+          "line": 25,
+          "column": 1
+        },
+        {
+          "title": "AC-6: default storage file uses port 3000 when PORT is unset",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 474,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:57:50.615Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "258c6a96a9c03cd38c8e-772b1097859bb374903e",
+          "file": "acceptance/ticket-10.spec.ts",
+          "line": 33,
+          "column": 1
+        },
+        {
+          "title": "AC-6: an explicit TODOS_FILE still wins",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 465,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:57:51.102Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "258c6a96a9c03cd38c8e-54f46eddbb0edf93c77c",
+          "file": "acceptance/ticket-10.spec.ts",
+          "line": 39,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "acceptance/ticket-2.spec.ts",
+      "file": "acceptance/ticket-2.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "UI",
+          "file": "acceptance/ticket-2.spec.ts",
+          "line": 29,
+          "column": 6,
+          "specs": [
+            {
+              "title": "AC-1: typing \"Buy milk\" and pressing Add appends it and clears the input",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 328,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:51.602Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-2-UI-AC--b9831-nds-it-and-clears-the-input-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-63ed813835aa4e7c6541",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 30,
+              "column": 3
+            },
+            {
+              "title": "AC-1: typing \"Buy milk\" and pressing Enter appends it and clears the input",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 231,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:52.149Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-2-UI-AC--315a9-nds-it-and-clears-the-input-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-f25d960dcd9f8e80c216",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 43,
+              "column": 3
+            },
+            {
+              "title": "AC-1: an added todo is stored on the server",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 219,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:52.394Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-2-UI-AC--5cc04-odo-is-stored-on-the-server-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-fb4c771ff391d88b8445",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 55,
+              "column": 3
+            },
+            {
+              "title": "AC-2: empty input adds nothing and shows \"Todo can't be empty\"",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 201,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:52.627Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-2-UI-AC--b6509--shows-Todo-can-t-be-empty--chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-5ab4ad7c19b3ab659f40",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 66,
+              "column": 3
+            },
+            {
+              "title": "AC-2: spaces-only input adds nothing and shows \"Todo can't be empty\"",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 219,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:52.841Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-2-UI-AC--5cb2d--shows-Todo-can-t-be-empty--chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-a11feac6579529fc074d",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 79,
+              "column": 3
+            },
+            {
+              "title": "AC-2: the empty message goes away after the next successful add",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 252,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:53.076Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-2-UI-AC--6506a-ter-the-next-successful-add-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-7d90ba7633caef6372bb",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 93,
+              "column": 3
+            },
+            {
+              "title": "AC-7: with no todos, opening the app shows \"No todos yet\"",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 138,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:53.342Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-2-UI-AC--6ac45-the-app-shows-No-todos-yet--chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-c1718d6e9bce36c31752",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 105,
+              "column": 3
+            },
+            {
+              "title": "AC-7: \"No todos yet\" is not shown once a todo exists",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 217,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:53.493Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-2-UI-AC--901ae-ot-shown-once-a-todo-exists-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-f5534196a80e0930f8f4",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 111,
+              "column": 3
+            },
+            {
+              "title": "AC-7: \"No todos yet\" is not shown when the app opens with stored todos",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 143,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:53.724Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-2-UI-AC--d702f-app-opens-with-stored-todos-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-70cb282bbc265f73d4dc",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 122,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "API",
+          "file": "acceptance/ticket-2.spec.ts",
+          "line": 130,
+          "column": 6,
+          "specs": [
+            {
+              "title": "AC-7: GET /api/todos returns [] when nothing is stored",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:53.881Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-279309b5288356bd3101",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 131,
+              "column": 3
+            },
+            {
+              "title": "AC-1: POST /api/todos trims text, returns 201 and appends in order",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 19,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:53.905Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-bf4d16bc0f2967ed5adc",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 138,
+              "column": 3
+            },
+            {
+              "title": "AC-2: POST /api/todos rejects empty text with 400 and stores nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:53.935Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-a57976ebf7d57712d9a5",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 164,
+              "column": 5
+            },
+            {
+              "title": "AC-2: POST /api/todos rejects whitespace-only text with 400 and stores nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:53.958Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-84826326159f8743f688",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 164,
+              "column": 5
+            },
+            {
+              "title": "AC-2: POST /api/todos rejects missing text with 400 and stores nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:53.981Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-675556299e23f86a51b5",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 164,
+              "column": 5
+            },
+            {
+              "title": "AC-2: POST /api/todos rejects non-string text with 400 and stores nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:54.004Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-5c6c41df99ba1ae57e33",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 164,
+              "column": 5
+            },
+            {
+              "title": "AC-2: POST /api/todos rejects invalid JSON with 400 and stores nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:54.027Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "a279f3842a2af3d19a2c-d9ff7cf3884754a8bb8f",
+              "file": "acceptance/ticket-2.spec.ts",
+              "line": 172,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "acceptance/ticket-3.spec.ts",
+      "file": "acceptance/ticket-3.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "UI",
+          "file": "acceptance/ticket-3.spec.ts",
+          "line": 39,
+          "column": 6,
+          "specs": [
+            {
+              "title": "AC-3: checking a todo crosses out its text and saves done: true",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 197,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:54.065Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-3-UI-AC--52cfd-ts-text-and-saves-done-true-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-169ad899f1dce4eaaa1f",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 40,
+              "column": 3
+            },
+            {
+              "title": "AC-3: a checked todo is still crossed out after a reload",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 253,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:54.275Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-3-UI-AC--04c18--crossed-out-after-a-reload-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-63593c775b3d9178ab68",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 58,
+              "column": 3
+            },
+            {
+              "title": "AC-3: a todo stored as done opens checked and crossed out",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 152,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:54.542Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-3-UI-AC--82e5a-ens-checked-and-crossed-out-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-858cb08d24bdec588c4e",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 71,
+              "column": 3
+            },
+            {
+              "title": "AC-3: if saving fails, the checkbox goes back and \"Could not update todo\" is shown",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 204,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:54.707Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-3-UI-AC--9a884-ld-not-update-todo-is-shown-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-c527cbe5b4f6dcd4a90b",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 79,
+              "column": 3
+            },
+            {
+              "title": "AC-4: unchecking a done todo removes the strike-through and saves done: false",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 202,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:54.927Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-3-UI-AC--10c42-hrough-and-saves-done-false-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-8731a2e435cd7fb20837",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 95,
+              "column": 3
+            },
+            {
+              "title": "AC-4: an unchecked todo is still not crossed out after a reload",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 238,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:55.142Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-3-UI-AC--6646e--crossed-out-after-a-reload-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-4316f5926e0944654eca",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 110,
+              "column": 3
+            },
+            {
+              "title": "AC-4: checking then unchecking a todo leaves it not crossed out",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 270,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:55.394Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-3-UI-AC--3167f-o-leaves-it-not-crossed-out-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-09738d563e6180ed61b6",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 123,
+              "column": 3
+            },
+            {
+              "title": "AC-4: if saving fails, the checkbox goes back to checked and \"Could not update todo\" is shown",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 203,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:55.677Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-3-UI-AC--fbd42-ld-not-update-todo-is-shown-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-97568696e247770ac3c0",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 136,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "API",
+          "file": "acceptance/ticket-3.spec.ts",
+          "line": 153,
+          "column": 6,
+          "specs": [
+            {
+              "title": "AC-3: PATCH /api/todos/:id with done: true returns the updated todo and stores it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 13,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:55.892Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-af3d888d02770fd5f3d2",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 154,
+              "column": 3
+            },
+            {
+              "title": "AC-4: PATCH /api/todos/:id with done: false returns the updated todo and stores it",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:55.916Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-063028dcc707d46ac61a",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 167,
+              "column": 3
+            },
+            {
+              "title": "AC-3: PATCH ignores extra fields and never changes the text",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:55.939Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-3c62cec376c529f09d58",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 179,
+              "column": 3
+            },
+            {
+              "title": "AC-3: PATCH an unknown id returns 404 and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:55.961Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-a96fd18cb19f4f86472f",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 186,
+              "column": 3
+            },
+            {
+              "title": "AC-3: PATCH with malformed JSON returns 400 \"Invalid JSON\" and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:55.984Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-558f072a66d9ef822e72",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 199,
+              "column": 5
+            },
+            {
+              "title": "AC-3: PATCH with a JSON array returns 400 \"Invalid JSON\" and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.006Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-7fb3601cfae851326f34",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 199,
+              "column": 5
+            },
+            {
+              "title": "AC-3: PATCH with a JSON string returns 400 \"Invalid JSON\" and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 13,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.033Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-7947967a994ad662bf66",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 199,
+              "column": 5
+            },
+            {
+              "title": "AC-3: PATCH with JSON null returns 400 \"Invalid JSON\" and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.056Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-ef504780f33b0b6e79b8",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 199,
+              "column": 5
+            },
+            {
+              "title": "AC-3: PATCH with missing done returns 400 \"done must be true or false\" and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.078Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-7f7cb3ed971d64cbd0bf",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 216,
+              "column": 5
+            },
+            {
+              "title": "AC-3: PATCH with done as a string returns 400 \"done must be true or false\" and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.099Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-cebb39f10841629bbe10",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 216,
+              "column": 5
+            },
+            {
+              "title": "AC-3: PATCH with done as a number returns 400 \"done must be true or false\" and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.121Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-759e1b6577ff682416e2",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 216,
+              "column": 5
+            },
+            {
+              "title": "AC-3: PATCH with done as null returns 400 \"done must be true or false\" and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.142Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-58171a0ab51ded3781da",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 216,
+              "column": 5
+            },
+            {
+              "title": "AC-3: GET /api/todos/:id returns 405 with allow: PATCH",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.163Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-af092fe41a03681df5e3",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 225,
+              "column": 5
+            },
+            {
+              "title": "AC-3: PUT /api/todos/:id returns 405 with allow: PATCH",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.184Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-58357be2daa468fa1ffa",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 225,
+              "column": 5
+            },
+            {
+              "title": "AC-3: POST /api/todos/:id returns 405 with allow: PATCH",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.205Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-6055e5d7efbea8cf822b",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 225,
+              "column": 5
+            },
+            {
+              "title": "AC-3: an unknown path under /api/ returns 404 JSON \"Not found\"",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 9,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.227Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c3096be44eefd90cbba8-4fb7c75da2fc201b30fd",
+              "file": "acceptance/ticket-3.spec.ts",
+              "line": 234,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "acceptance/ticket-4.spec.ts",
+      "file": "acceptance/ticket-4.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "UI",
+          "file": "acceptance/ticket-4.spec.ts",
+          "line": 72,
+          "column": 6,
+          "specs": [
+            {
+              "title": "AC-5: clicking Delete removes the todo at once, with no confirmation",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 279,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.266Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-UI-AC--665c1-t-once-with-no-confirmation-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-691baea913d9b218537f",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 73,
+              "column": 3
+            },
+            {
+              "title": "AC-5: each todo has a \"Delete\" button inside its list item",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 271,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.558Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-UI-AC--40b13-button-inside-its-list-item-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-2211088c94890a632a81",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 100,
+              "column": 3
+            },
+            {
+              "title": "AC-5: clicking Delete does not toggle the todo's checkbox",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 220,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:56.841Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-UI-AC--31afb--toggle-the-todo-s-checkbox-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-35c8a6644daf0efa525e",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 117,
+              "column": 3
+            },
+            {
+              "title": "AC-5: deleting the last todo shows \"No todos yet\" again",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 209,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:57.073Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-UI-AC--74474-do-shows-No-todos-yet-again-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-6e603e7a835287651b65",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 136,
+              "column": 3
+            },
+            {
+              "title": "AC-5: if the server fails, the todo stays and \"Could not delete todo\" is shown",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 252,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:57.294Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-UI-AC--46637-ld-not-delete-todo-is-shown-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-8961edbf2444f85a223c",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 149,
+              "column": 3
+            },
+            {
+              "title": "AC-5: if the network fails, the todo stays and \"Could not delete todo\" is shown",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 235,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:57.560Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-UI-AC--223ad-ld-not-delete-todo-is-shown-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-328c95faf5a84380a435",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 168,
+              "column": 3
+            },
+            {
+              "title": "AC-5: deleting a todo that is already gone on the server removes it with no error",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 266,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:57.810Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-UI-AC--97bb3-er-removes-it-with-no-error-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-de5df0680b6e59f5c497",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 185,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "Reload",
+          "file": "acceptance/ticket-4.spec.ts",
+          "line": 206,
+          "column": 6,
+          "specs": [
+            {
+              "title": "AC-6: after adding, checking and deleting, a reload shows the same todos, order and done states",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1145,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:58.092Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-Reload-a31cb-todos-order-and-done-states-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-bafa0ca607f0232a4b1d",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 207,
+              "column": 3
+            },
+            {
+              "title": "AC-6: a deleted todo does not come back after a reload",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 294,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:59.250Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-Reload-837b6-ot-come-back-after-a-reload-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-c552d526e0d11edbc2b1",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 244,
+              "column": 3
+            },
+            {
+              "title": "AC-6: deleting every todo then reloading shows \"No todos yet\"",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 380,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:59.560Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-Reload-66741-loading-shows-No-todos-yet--chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-51f707bd557d175f0c1b",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 259,
+              "column": 3
+            },
+            {
+              "title": "AC-6: the list comes from the server, so a fresh browser shows the same todos",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 488,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:57:59.958Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-Reload-fc90f-rowser-shows-the-same-todos-chromium/test-finished-1.png"
+                        },
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-4-Reload-fc90f-rowser-shows-the-same-todos-chromium/test-finished-2.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-eea9c7359ba3f492f12c",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 273,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "API",
+          "file": "acceptance/ticket-4.spec.ts",
+          "line": 300,
+          "column": 6,
+          "specs": [
+            {
+              "title": "AC-5: DELETE /api/todos/:id returns 204 with an empty body and removes the todo from storage",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 14,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.459Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-6d508c176ff8297f7c7c",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 301,
+              "column": 3
+            },
+            {
+              "title": "AC-5: DELETE keeps the other todos, their order and done states",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 23,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.483Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-71d9dc5a0e7a0cd00058",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 314,
+              "column": 3
+            },
+            {
+              "title": "AC-5: DELETE ignores a request body",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.517Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-3c3c23917ec80904d634",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 328,
+              "column": 3
+            },
+            {
+              "title": "AC-5: DELETE an unknown id returns 404 \"Todo not found\" and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.540Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-bc1e448433cb6ae3cf66",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 337,
+              "column": 3
+            },
+            {
+              "title": "AC-5: a second DELETE of the same id returns 404 \"Todo not found\"",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 15,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.561Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-94f117e5a309a10baf79",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 346,
+              "column": 3
+            },
+            {
+              "title": "AC-5: PATCH on a deleted id returns 404 \"Todo not found\"",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 13,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.590Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-1f2c30df7a569e03cb25",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 358,
+              "column": 3
+            },
+            {
+              "title": "AC-5: GET /api/todos/:id returns 405 with allow: PATCH, DELETE",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 11,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.613Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-a910ea139ffaae2e9e9b",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 371,
+              "column": 5
+            },
+            {
+              "title": "AC-5: PUT /api/todos/:id returns 405 with allow: PATCH, DELETE",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 10,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.635Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-8613968ef81ed7899acf",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 371,
+              "column": 5
+            },
+            {
+              "title": "AC-5: POST /api/todos/:id returns 405 with allow: PATCH, DELETE",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.656Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "18c6afab3511d207060e-3b8426f38ddd939ddfc4",
+              "file": "acceptance/ticket-4.spec.ts",
+              "line": 371,
+              "column": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "acceptance/ticket-8.spec.ts",
+      "file": "acceptance/ticket-8.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "AC-5: delete only for the local user",
+          "file": "acceptance/ticket-8.spec.ts",
+          "line": 57,
+          "column": 6,
+          "specs": [
+            {
+              "title": "AC-5: foreign Host DELETE is refused with 403 and the todo stays",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.689Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-f42a076df223136160e6",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 58,
+              "column": 3
+            },
+            {
+              "title": "AC-5: Host \"evil.example\" is refused on every method and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.703Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-e1bd654c52f47c56e688",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 67,
+              "column": 5
+            },
+            {
+              "title": "AC-5: Host \"evil.example:3000\" is refused on every method and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 8,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.720Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-1cde375cc3c693a1d3ce",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 67,
+              "column": 5
+            },
+            {
+              "title": "AC-5: Host \"localhost\" is refused on every method and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.738Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-9a9511f97419b779bcf0",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 67,
+              "column": 5
+            },
+            {
+              "title": "AC-5: Host \"localhost:3001\" is refused on every method and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.755Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-6ac8f0f366f1f8bcf26d",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 67,
+              "column": 5
+            },
+            {
+              "title": "AC-5: Host \"127.0.0.1:3001\" is refused on every method and writes nothing",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.772Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-189b6be37088cd8e241a",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 67,
+              "column": 5
+            },
+            {
+              "title": "AC-5: a request with no Host header is refused",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.790Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-69e54058d89c8703231e",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 83,
+              "column": 3
+            },
+            {
+              "title": "AC-5: Host \"localhost:3000\" can still delete (204) and list",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.802Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-948d9540ada5ad0a5e22",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 91,
+              "column": 5
+            },
+            {
+              "title": "AC-5: Host \"127.0.0.1:3000\" can still delete (204) and list",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.817Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-2cbb3af94ad82bc30414",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 91,
+              "column": 5
+            },
+            {
+              "title": "AC-5: Host \"LOCALHOST:3000\" can still delete (204) and list",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.832Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-2c57ac807ff4dbdddc45",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 91,
+              "column": 5
+            },
+            {
+              "title": "AC-5: unknown id with an allowed Host is still 404",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.847Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-2e0c66eb1a7f3b09de9b",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 101,
+              "column": 3
+            },
+            {
+              "title": "AC-5: static files are not host-checked",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.859Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-07bccb5e8217c6e4bd1c",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 106,
+              "column": 3
+            },
+            {
+              "title": "AC-5: Delete button in the UI still removes the todo at once",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 207,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:00.871Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/home/runner/work/todo-app/todo-app/test-results/acceptance-ticket-8-AC-5-d-de61b-ll-removes-the-todo-at-once-chromium/test-finished-1.png"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-e9a35c9e73d76b53726b",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 111,
+              "column": 3
+            },
+            {
+              "title": "AC-5: server is not reachable on a non-loopback interface by default",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.091Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-f0423de04d5357ac581c",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 119,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "AC-5: no CORS headers (cross-site deletes stay blocked)",
+          "file": "acceptance/ticket-8.spec.ts",
+          "line": 140,
+          "column": 6,
+          "specs": [
+            {
+              "title": "AC-5: GET /api/todos with a foreign Origin has no Access-Control-* header",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.105Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-4dcc45c779ede904c2ac",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 151,
+              "column": 5
+            },
+            {
+              "title": "AC-5: POST /api/todos with a foreign Origin has no Access-Control-* header",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.118Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-1c392c5af362e15a2d73",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 151,
+              "column": 5
+            },
+            {
+              "title": "AC-5: PATCH /api/todos/a with a foreign Origin has no Access-Control-* header",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.131Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-8d3b297f0f261212750b",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 151,
+              "column": 5
+            },
+            {
+              "title": "AC-5: DELETE /api/todos/a with a foreign Origin has no Access-Control-* header",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.143Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-b56aa05d60de96417316",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 151,
+              "column": 5
+            },
+            {
+              "title": "AC-5: DELETE /api/todos/missing with a foreign Origin has no Access-Control-* header",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.156Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-cb834fb689010a05ea63",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 151,
+              "column": 5
+            },
+            {
+              "title": "AC-5: OPTIONS /api/todos with a foreign Origin has no Access-Control-* header",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.168Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-f50077f77321a6754150",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 151,
+              "column": 5
+            },
+            {
+              "title": "AC-5: OPTIONS /api/todos/a with a foreign Origin has no Access-Control-* header",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.180Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-aa3ef68c0f42b193f918",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 151,
+              "column": 5
+            },
+            {
+              "title": "AC-5: preflight for a cross-site DELETE gets no CORS approval",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.195Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-76513bce2e1109f68a5c",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 158,
+              "column": 3
+            },
+            {
+              "title": "AC-5: the 403 response carries no Access-Control-* header either",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-28T07:58:01.210Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "939eeac85460326fb69e-1daefebaf201aa22b762",
+              "file": "acceptance/ticket-8.spec.ts",
+              "line": 168,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "api.spec.js",
+      "file": "api.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "unsupported method returns 405 with an allow header",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.234Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-724a4e8f7dba908d8b64",
+          "file": "api.spec.js",
+          "line": 13,
+          "column": 1
+        },
+        {
+          "title": "POST with malformed JSON returns 400 Invalid JSON and stores nothing",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.253Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-b055df604dd6c7201df9",
+          "file": "api.spec.js",
+          "line": 26,
+          "column": 3
+        },
+        {
+          "title": "POST with a bare JSON string returns 400 Invalid JSON and stores nothing",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.276Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-5041090a44a8782a85c7",
+          "file": "api.spec.js",
+          "line": 26,
+          "column": 3
+        },
+        {
+          "title": "POST with a JSON array returns 400 Invalid JSON and stores nothing",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.300Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-5d179768009740ca9928",
+          "file": "api.spec.js",
+          "line": 26,
+          "column": 3
+        },
+        {
+          "title": "POST with JSON null returns 400 Invalid JSON and stores nothing",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.322Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-a54d0f5f1ed38be6337b",
+          "file": "api.spec.js",
+          "line": 26,
+          "column": 3
+        },
+        {
+          "title": "a body over 10 KB returns 413 and stores nothing",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 12,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.343Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-6d71ec44ae98fac49482",
+          "file": "api.spec.js",
+          "line": 37,
+          "column": 1
+        },
+        {
+          "title": "a corrupt storage file returns 500 and is not overwritten",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.368Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-46cec5b73ba9416c00ec",
+          "file": "api.spec.js",
+          "line": 43,
+          "column": 1
+        },
+        {
+          "title": "concurrent POSTs keep every todo",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 34,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.392Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-ce3ef22833d4f2cde39e",
+          "file": "api.spec.js",
+          "line": 50,
+          "column": 1
+        },
+        {
+          "title": "a missing storage file is an empty list and is created on first add",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.436Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-c7ef36e8dbe456e3d5fe",
+          "file": "api.spec.js",
+          "line": 58,
+          "column": 1
+        },
+        {
+          "title": "todo text is rendered as text, not HTML",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 155,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.456Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/home/runner/work/todo-app/todo-app/test-results/api-todo-text-is-rendered-as-text-not-HTML-chromium/test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-3c6e185e7a1351b9792b",
+          "file": "api.spec.js",
+          "line": 66,
+          "column": 1
+        },
+        {
+          "title": "a storage file that is not an array returns 500 and is not overwritten",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.624Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-2073cac01d2f0adf56dc",
+          "file": "api.spec.js",
+          "line": 77,
+          "column": 1
+        },
+        {
+          "title": "PATCH finds an id that needs URL encoding",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.645Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-d93fbdeea658b1dc8251",
+          "file": "api.spec.js",
+          "line": 84,
+          "column": 1
+        },
+        {
+          "title": "PATCH with a malformed percent-encoded id returns 404 and writes nothing",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.665Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-23aa045d1efdccb44f31",
+          "file": "api.spec.js",
+          "line": 91,
+          "column": 1
+        },
+        {
+          "title": "a PATCH body over 10 KB returns 413 and writes nothing",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.683Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-14096670626cbdb9c15f",
+          "file": "api.spec.js",
+          "line": 98,
+          "column": 1
+        },
+        {
+          "title": "concurrent PATCHes on different todos keep every change",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 32,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.704Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-813a8cd245753094b86a",
+          "file": "api.spec.js",
+          "line": 106,
+          "column": 1
+        },
+        {
+          "title": "/api itself and nested unknown API paths return 404 JSON",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 12,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.747Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-c3841489e3d38541c6d4",
+          "file": "api.spec.js",
+          "line": 115,
+          "column": 1
+        },
+        {
+          "title": "a rejected PATCH fetch puts the checkbox back and shows the error",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 193,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.770Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/home/runner/work/todo-app/todo-app/test-results/api-a-rejected-PATCH-fetch-0572e-ox-back-and-shows-the-error-chromium/test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-629c75b12c59e0718b73",
+          "file": "api.spec.js",
+          "line": 123,
+          "column": 1
+        },
+        {
+          "title": "a rejected add fetch shows \"Could not add todo\" and keeps the input",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 218,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:01.976Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/home/runner/work/todo-app/todo-app/test-results/api-a-rejected-add-fetch-s-981c9-dd-todo-and-keeps-the-input-chromium/test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-b6794f234fe7ca5f4e14",
+          "file": "api.spec.js",
+          "line": 134,
+          "column": 1
+        },
+        {
+          "title": "DELETE finds an id that needs URL encoding",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:02.207Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-9dc59c577c71988ea969",
+          "file": "api.spec.js",
+          "line": 143,
+          "column": 1
+        },
+        {
+          "title": "DELETE with a malformed percent-encoded id returns 404 and writes nothing",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:02.226Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-70861d78b20f3a6a7889",
+          "file": "api.spec.js",
+          "line": 150,
+          "column": 1
+        },
+        {
+          "title": "PATCH and DELETE skip null entries in the storage file",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:02.245Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-bb1f003c2103ff68a02a",
+          "file": "api.spec.js",
+          "line": 157,
+          "column": 1
+        },
+        {
+          "title": "concurrent DELETEs and a POST keep every other change",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 17,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:02.265Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-db723de6c8fd65741c92",
+          "file": "api.spec.js",
+          "line": 164,
+          "column": 1
+        },
+        {
+          "title": "after a delete, focus moves to the next Delete button, or the input when none remain",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 267,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:02.293Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/home/runner/work/todo-app/todo-app/test-results/api-after-a-delete-focus-m-520db--the-input-when-none-remain-chromium/test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-7cbc1b895f36229dd7c4",
+          "file": "api.spec.js",
+          "line": 176,
+          "column": 1
+        },
+        {
+          "title": "after toggling, focus stays on the todo's checkbox",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 185,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:02.574Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/home/runner/work/todo-app/todo-app/test-results/api-after-toggling-focus-stays-on-the-todo-s-checkbox-chromium/test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8747e39b871de0524be5-be2ffb707a5802693794",
+          "file": "api.spec.js",
+          "line": 191,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "smoke.spec.js",
+      "file": "smoke.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "the app loads",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 136,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-28T07:58:02.775Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/home/runner/work/todo-app/todo-app/test-results/smoke-the-app-loads-chromium/test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2c14808d47b386fba9eb-7720cfdf50f86a38ae34",
+          "file": "smoke.spec.js",
+          "line": 3,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-28T07:57:48.150Z",
+    "duration": 14937.008,
+    "expected": 111,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
