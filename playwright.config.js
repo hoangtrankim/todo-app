@@ -24,5 +24,7 @@ export default defineConfig({
     port,
     env: { PORT: String(port), TODOS_FILE: process.env.TODOS_FILE },
     reuseExistingServer: !process.env.CI,
+    // SIGTERM instead of the default SIGKILL lets the server write its coverage on exit.
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
   },
 });

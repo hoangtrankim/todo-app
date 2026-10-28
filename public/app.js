@@ -2,7 +2,7 @@
 const EMPTY_ERROR = "Todo can't be empty";
 
 const form = document.getElementById('new-todo-form');
-const input = document.getElementById('new-todo');
+const input = /** @type {HTMLInputElement} */ (document.getElementById('new-todo'));
 const errorBox = document.getElementById('todo-error');
 const emptyMessage = document.getElementById('empty-message');
 const list = document.getElementById('todo-list');
@@ -36,7 +36,7 @@ function renderTodo(todo) {
 
 // render() replaces the list, so put focus back on the matching control of a todo.
 function focusIn(id, selector) {
-  const li = [...list.children].find((el) => el.dataset.id === id);
+  const li = /** @type {HTMLElement[]} */ ([...list.children]).find((el) => el.dataset.id === id);
   li?.querySelector(selector)?.focus();
 }
 
