@@ -97,7 +97,7 @@ async function readJsonObject(req) {
 
 async function handleTodos(req, res) {
   if (req.method === 'GET') {
-    return sendJson(res, 200, await readTodos());
+    return sendJson(res, 200, (await readTodos()).filter(isTodo));
   }
   if (req.method === 'POST') {
     const body = await readJsonObject(req);
