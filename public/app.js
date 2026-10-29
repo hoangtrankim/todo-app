@@ -4,6 +4,7 @@ const EMPTY_ERROR = "Todo can't be empty";
 const form = document.getElementById('new-todo-form');
 const input = /** @type {HTMLInputElement} */ (document.getElementById('new-todo'));
 const errorBox = document.getElementById('todo-error');
+const countMessage = document.getElementById('todo-count');
 const emptyMessage = document.getElementById('empty-message');
 const list = document.getElementById('todo-list');
 
@@ -86,6 +87,8 @@ function render() {
   list.replaceChildren(...todos.map(renderTodo));
   list.hidden = todos.length === 0;
   emptyMessage.hidden = todos.length !== 0;
+  countMessage.textContent = `${todos.filter((t) => !t.done).length} items left`;
+  countMessage.hidden = false;
 }
 
 function showError(message) {
