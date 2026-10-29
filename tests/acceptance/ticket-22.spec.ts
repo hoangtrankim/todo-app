@@ -6,7 +6,7 @@ import path from 'node:path';
 const TODOS_FILE =
   process.env.TODOS_FILE ?? path.join(os.tmpdir(), 'todo-app-test', 'todos.json');
 
-async function seed(todos: { id: number; text: string; done: boolean }[]) {
+async function seed(todos: { id: string; text: string; done: boolean }[]) {
   await mkdir(path.dirname(TODOS_FILE), { recursive: true });
   await writeFile(TODOS_FILE, JSON.stringify(todos));
 }
@@ -17,9 +17,9 @@ test.beforeEach(async () => {
 
 test('AC-1: 3 todos with 1 done shows "2 items left"', async ({ page }) => {
   await seed([
-    { id: 1, text: 'One', done: true },
-    { id: 2, text: 'Two', done: false },
-    { id: 3, text: 'Three', done: false },
+    { id: '1', text: 'One', done: true },
+    { id: '2', text: 'Two', done: false },
+    { id: '3', text: 'Three', done: false },
   ]);
   await page.goto('/');
   await expect(page.getByText('2 items left')).toBeVisible();
@@ -27,8 +27,8 @@ test('AC-1: 3 todos with 1 done shows "2 items left"', async ({ page }) => {
 
 test('AC-1: count updates after add, check and delete without reload', async ({ page }) => {
   await seed([
-    { id: 1, text: 'One', done: false },
-    { id: 2, text: 'Two', done: false },
+    { id: '1', text: 'One', done: false },
+    { id: '2', text: 'Two', done: false },
   ]);
   await page.goto('/');
   await expect(page.getByText('2 items left')).toBeVisible();
@@ -42,10 +42,13 @@ test('AC-1: count updates after add, check and delete without reload', async ({ 
 
   await page.getByRole('list', { name: 'Todos' }).getByRole('checkbox').first().uncheck();
   await expect(page.getByText('3 items left')).toBeVisible();
+
+  await page.getByRole('list', { name: 'Todos' }).getByRole('button', { name: /delete/i }).first().click();
+  await expect(page.getByText('2 items left')).toBeVisible();
 });
 
 test('AC-1: count uses "items" even for 1', async ({ page }) => {
-  await seed([{ id: 1, text: 'One', done: false }]);
+  await seed([{ id: '1', text: 'One', done: false }]);
   await page.goto('/');
   await expect(page.getByText('1 items left')).toBeVisible();
 });
