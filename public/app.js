@@ -178,14 +178,29 @@ async function clearCompleted() {
 }
 
 function render() {
+  const draft = openEditDraft();
   rendering = true;
   list.replaceChildren(...todos.map(renderTodo));
   rendering = false;
+  if (draft) restoreEditDraft(draft);
   list.hidden = todos.length === 0;
   emptyMessage.hidden = todos.length !== 0;
   countMessage.textContent = `${todos.filter((t) => !t.done).length} items left`;
   countMessage.hidden = false;
   clearButton.hidden = !todos.some((t) => t.done);
+}
+
+// What the user has typed in the open edit field, so a re-render does not throw it away.
+function openEditDraft() {
+  const field = /** @type {HTMLInputElement | null} */ (list.querySelector('input.edit'));
+  return field && { value: field.value, start: field.selectionStart, end: field.selectionEnd };
+}
+
+function restoreEditDraft({ value, start, end }) {
+  const field = /** @type {HTMLInputElement | null} */ (list.querySelector('input.edit'));
+  if (!field) return;
+  field.value = value;
+  field.setSelectionRange(start, end);
 }
 
 function showError(message) {
