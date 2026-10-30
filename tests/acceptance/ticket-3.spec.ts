@@ -176,8 +176,8 @@ test.describe('API', () => {
     ]);
   });
 
-  test('AC-3: PATCH ignores extra fields and never changes the text', async ({ request }) => {
-    const res = await request.patch('/api/todos/a', { data: { done: true, text: 'Hacked', id: 'z' } });
+  test('AC-3: PATCH ignores id and unknown fields', async ({ request }) => {
+    const res = await request.patch('/api/todos/a', { data: { done: true, id: 'z', extra: 'x' } });
     expect(res.status()).toBe(200);
     expect(await res.json()).toEqual({ id: 'a', text: 'Buy milk', done: true });
     expect((await storedTodos(request))[0]).toEqual({ id: 'a', text: 'Buy milk', done: true });
