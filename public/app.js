@@ -11,6 +11,10 @@ const list = document.getElementById('todo-list');
 
 let todos = [];
 let editingId = null;
+// Texts being saved (todo id to text), shown until the server answers.
+const pendingTexts = new Map();
+// True while render() swaps the list: the blur from removing a focused field is not the user clicking away.
+let rendering = false;
 
 // One <li> per todo: a checkbox named by the todo's text, the text (or an edit input while
 // editing it), then a Delete button. The text sits outside the label so a double-click
@@ -39,7 +43,7 @@ function renderText(todo) {
   const text = document.createElement('span');
   text.className = 'todo-text';
   text.classList.toggle('done', todo.done);
-  text.textContent = todo.text;
+  text.textContent = pendingTexts.get(todo.id) ?? todo.text;
   text.addEventListener('dblclick', () => startEdit(todo));
   return text;
 }
@@ -54,7 +58,9 @@ function renderEditInput(todo) {
     if (event.key === 'Enter') saveEdit(todo, editInput.value);
     else if (event.key === 'Escape') cancelEdit(todo);
   });
-  editInput.addEventListener('blur', () => saveEdit(todo, editInput.value));
+  editInput.addEventListener('blur', () => {
+    if (!rendering) saveEdit(todo, editInput.value);
+  });
   return editInput;
 }
 
@@ -84,9 +90,12 @@ async function saveEdit(todo, value) {
   }
   if (text === todo.text) {
     render();
+    clearError();
     focusIn(todo.id, 'input[type="checkbox"]');
     return;
   }
+  pendingTexts.set(todo.id, text);
+  render();
   await patchTodo(todo, { text }, 'Could not save');
 }
 
@@ -107,14 +116,18 @@ async function patchTodo(todo, changes, failMessage) {
     if (!res.ok) throw new Error(`PATCH /api/todos/${todo.id} failed: ${res.status}`);
     const saved = await res.json();
     todos = todos.map((t) => (t.id === saved.id ? saved : t));
+    pendingTexts.delete(todo.id);
     render();
     clearError();
   } catch (err) {
     console.error(err);
+    pendingTexts.delete(todo.id);
     render();
     showError(failMessage);
   }
-  focusIn(todo.id, 'input[type="checkbox"]');
+  // A newer edit may have started while saving: render() rebuilt its field, so refocus that one.
+  if (editingId === null) focusIn(todo.id, 'input[type="checkbox"]');
+  else focusIn(editingId, 'input.edit');
 }
 
 function setDone(todo, done) {
@@ -165,7 +178,9 @@ async function clearCompleted() {
 }
 
 function render() {
+  rendering = true;
   list.replaceChildren(...todos.map(renderTodo));
+  rendering = false;
   list.hidden = todos.length === 0;
   emptyMessage.hidden = todos.length !== 0;
   countMessage.textContent = `${todos.filter((t) => !t.done).length} items left`;
