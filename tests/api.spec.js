@@ -131,6 +131,20 @@ test('a rejected PATCH fetch puts the checkbox back and shows the error', async 
   await expect(page.getByRole('checkbox', { name: 'Buy milk' })).not.toBeChecked();
 });
 
+test('a rejected edit save restores the old text, closes the field and shows the error', async ({ page }) => {
+  await writeFile(TODOS_FILE, JSON.stringify([{ id: 'a', text: 'Buy milk', done: false }]));
+  await page.route('**/api/todos/*', (route) =>
+    route.request().method() === 'PATCH' ? route.abort() : route.continue(),
+  );
+  await page.goto('/');
+  await page.getByText('Buy milk').dblclick();
+  await page.getByRole('textbox', { name: 'Edit todo' }).fill('Buy oat milk');
+  await page.getByRole('textbox', { name: 'Edit todo' }).press('Enter');
+  await expect(page.getByRole('alert')).toHaveText('Could not save');
+  await expect(page.getByRole('textbox', { name: 'Edit todo' })).toHaveCount(0);
+  await expect(page.getByText('Buy milk')).toBeVisible();
+});
+
 test('a rejected add fetch shows "Could not add todo" and keeps the input', async ({ page }) => {
   await page.route('**/api/todos', (route) => (route.request().method() === 'POST' ? route.abort() : route.continue()));
   await page.goto('/');
