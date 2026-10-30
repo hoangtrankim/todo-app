@@ -84,7 +84,7 @@ async function deleteTodo(todo) {
   else input.focus();
 }
 
-// Drop the done todos once the server confirms; on failure the list stays as it is.
+// Delete the done todos, then show what the server kept; on failure the list stays as it is.
 async function clearCompleted() {
   try {
     const res = await fetch('/api/todos?done=true', { method: 'DELETE' });
@@ -94,7 +94,13 @@ async function clearCompleted() {
     showError('Could not clear completed todos');
     return;
   }
-  todos = todos.filter((t) => !t.done);
+  try {
+    todos = await fetchTodos();
+  } catch (err) {
+    console.error(err);
+    showError('Could not refresh todos');
+    return;
+  }
   render();
   clearError();
   input.focus();
@@ -119,10 +125,14 @@ function clearError() {
   errorBox.hidden = true;
 }
 
-async function load() {
+async function fetchTodos() {
   const res = await fetch('/api/todos');
   if (!res.ok) throw new Error(`GET /api/todos failed: ${res.status}`);
-  todos = await res.json();
+  return res.json();
+}
+
+async function load() {
+  todos = await fetchTodos();
   render();
 }
 
