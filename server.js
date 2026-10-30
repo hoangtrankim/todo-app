@@ -143,15 +143,30 @@ function isTodo(t) {
   );
 }
 
+// Validates every field before anything is stored, so a bad field changes nothing.
+function readTodoChanges(body) {
+  const changes = {};
+  if ('text' in body) {
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) throw new HttpError(400, EMPTY_ERROR);
+    changes.text = text;
+  }
+  if ('done' in body || !('text' in body)) {
+    if (typeof body.done !== 'boolean') throw new HttpError(400, 'done must be true or false');
+    changes.done = body.done;
+  }
+  return changes;
+}
+
 async function handleTodo(req, res, id) {
   if (req.method === 'PATCH') {
     const body = await readJsonObject(req);
-    if (typeof body.done !== 'boolean') throw new HttpError(400, 'done must be true or false');
+    const changes = readTodoChanges(body);
     // Throwing inside the update skips the write, so an unknown id changes nothing.
     const todo = await updateTodos((todos) => {
       const found = todos.find((t) => isTodo(t) && t.id === id);
       if (!found) throw new HttpError(404, 'Todo not found');
-      found.done = body.done;
+      Object.assign(found, changes);
       return found;
     });
     return sendJson(res, 200, todo);
