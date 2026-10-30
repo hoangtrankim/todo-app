@@ -53,7 +53,7 @@ function renderEditInput(todo) {
   editInput.type = 'text';
   editInput.className = 'edit';
   editInput.setAttribute('aria-label', 'Edit todo');
-  editInput.value = todo.text;
+  editInput.value = pendingTexts.get(todo.id) ?? todo.text;
   editInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') saveEdit(todo, editInput.value);
     else if (event.key === 'Escape') cancelEdit(todo);
@@ -88,7 +88,7 @@ async function saveEdit(todo, value) {
     focusIn(todo.id, 'input[type="checkbox"]');
     return;
   }
-  if (text === todo.text) {
+  if (text === (pendingTexts.get(todo.id) ?? todo.text)) {
     render();
     clearError();
     focusIn(todo.id, 'input[type="checkbox"]');
