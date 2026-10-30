@@ -8,6 +8,11 @@
       .todo-text.done {
         text-decoration: line-through;
       }
+      [aria-pressed='true'] {
+        font-weight: bold;
+        border: 2px solid currentColor;
+        background: #ddd;
+      }
     </style>
   </head>
   <body>
@@ -21,6 +26,11 @@
       <p id="todo-error" role="alert" hidden></p>
       <p id="todo-count" hidden></p>
       <button type="button" id="clear-completed" hidden>Clear completed</button>
+      <div role="group" aria-label="Filter">
+        <button type="button" data-filter="all">All</button>
+        <button type="button" data-filter="active">Active</button>
+        <button type="button" data-filter="done">Done</button>
+      </div>
       <p id="empty-message" hidden>No todos yet</p>
       <ul id="todo-list" aria-label="Todos" hidden></ul>
     </main>
