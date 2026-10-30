@@ -10,9 +10,11 @@ const clearButton = document.getElementById('clear-completed');
 const list = document.getElementById('todo-list');
 
 let todos = [];
+let editingId = null;
 
-// One <li> per todo: a checkbox labelled by the todo's text, then a Delete button
-// outside the label so clicking it never toggles the checkbox.
+// One <li> per todo: a checkbox named by the todo's text, the text (or an edit input while
+// editing it), then a Delete button. The text sits outside the label so a double-click
+// never toggles the checkbox.
 function renderTodo(todo) {
   const li = document.createElement('li');
   li.dataset.id = todo.id;
@@ -21,19 +23,65 @@ function renderTodo(todo) {
   checkbox.type = 'checkbox';
   checkbox.checked = todo.done;
   checkbox.addEventListener('change', () => setDone(todo, checkbox.checked));
-  const text = document.createElement('span');
-  text.className = 'todo-text';
-  text.classList.toggle('done', todo.done);
-  text.textContent = todo.text;
-  label.append(checkbox, ' ', text);
+  checkbox.setAttribute('aria-label', todo.text);
+  label.append(checkbox);
   const deleteButton = document.createElement('button');
   deleteButton.type = 'button';
   deleteButton.className = 'delete';
   deleteButton.textContent = 'Delete';
   deleteButton.setAttribute('aria-label', `Delete ${todo.text}`);
   deleteButton.addEventListener('click', () => deleteTodo(todo));
-  li.append(label, ' ', deleteButton);
+  li.append(label, ' ', todo.id === editingId ? renderEditInput(todo) : renderText(todo), ' ', deleteButton);
   return li;
+}
+
+function renderText(todo) {
+  const text = document.createElement('span');
+  text.className = 'todo-text';
+  text.classList.toggle('done', todo.done);
+  text.textContent = todo.text;
+  text.addEventListener('dblclick', () => startEdit(todo));
+  return text;
+}
+
+function renderEditInput(todo) {
+  const editInput = document.createElement('input');
+  editInput.type = 'text';
+  editInput.className = 'edit';
+  editInput.setAttribute('aria-label', 'Edit todo');
+  editInput.value = todo.text;
+  editInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') saveEdit(todo, editInput.value);
+    else if (event.key === 'Escape') cancelEdit(todo);
+  });
+  editInput.addEventListener('blur', () => saveEdit(todo, editInput.value));
+  return editInput;
+}
+
+function startEdit(todo) {
+  editingId = todo.id;
+  render();
+  focusIn(todo.id, 'input.edit');
+}
+
+function cancelEdit(todo) {
+  if (editingId !== todo.id) return;
+  editingId = null;
+  render();
+  focusIn(todo.id, 'input[type="checkbox"]');
+}
+
+// Clearing editingId first makes the blur caused by the re-render a no-op.
+async function saveEdit(todo, value) {
+  if (editingId !== todo.id) return;
+  editingId = null;
+  const text = value.trim();
+  if (text === todo.text) {
+    render();
+    focusIn(todo.id, 'input[type="checkbox"]');
+    return;
+  }
+  await patchTodo(todo, { text }, 'Could not save');
 }
 
 // render() replaces the list, so put focus back on the matching control of a todo.
@@ -42,13 +90,13 @@ function focusIn(id, selector) {
   li?.querySelector(selector)?.focus();
 }
 
-// Save the new state; the page re-renders from the stored todo, or from the old one on failure.
-async function setDone(todo, done) {
+// Save the changes; the page re-renders from the stored todo, or from the old one on failure.
+async function patchTodo(todo, changes, failMessage) {
   try {
     const res = await fetch(`/api/todos/${encodeURIComponent(todo.id)}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ done }),
+      body: JSON.stringify(changes),
     });
     if (!res.ok) throw new Error(`PATCH /api/todos/${todo.id} failed: ${res.status}`);
     const saved = await res.json();
@@ -58,9 +106,13 @@ async function setDone(todo, done) {
   } catch (err) {
     console.error(err);
     render();
-    showError('Could not update todo');
+    showError(failMessage);
   }
   focusIn(todo.id, 'input[type="checkbox"]');
+}
+
+function setDone(todo, done) {
+  return patchTodo(todo, { done }, 'Could not update todo');
 }
 
 // Remove the todo once the server confirms; 404 means it is already gone, so drop it too.
