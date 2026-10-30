@@ -201,6 +201,7 @@ function render() {
   if (draft) restoreEditDraft(draft);
   list.hidden = todos.length === 0;
   emptyMessage.hidden = todos.length !== 0;
+  emptyMessage.textContent = todos.length === 0 ? 'No todos yet' : '';
   countMessage.textContent = `${todos.filter((t) => !t.done).length} items left`;
   countMessage.hidden = false;
   clearButton.hidden = !todos.some((t) => t.done);
