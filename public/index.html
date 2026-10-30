@@ -27,11 +27,11 @@
       <p id="todo-count" hidden></p>
       <button type="button" id="clear-completed" hidden>Clear completed</button>
       <div role="group" aria-label="Filter">
-        <button type="button" data-filter="all">All</button>
-        <button type="button" data-filter="active">Active</button>
-        <button type="button" data-filter="done">Done</button>
+        <button type="button" data-filter="all" aria-pressed="true">All</button>
+        <button type="button" data-filter="active" aria-pressed="false">Active</button>
+        <button type="button" data-filter="done" aria-pressed="false">Done</button>
       </div>
-      <p id="empty-message" hidden>No todos yet</p>
+      <p id="empty-message" hidden></p>
       <ul id="todo-list" aria-label="Todos" hidden></ul>
     </main>
     <script type="module" src="app.js"></script>
