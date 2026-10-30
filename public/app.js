@@ -81,23 +81,7 @@ async function saveEdit(todo, value) {
     focusIn(todo.id, 'input[type="checkbox"]');
     return;
   }
-  try {
-    const res = await fetch(`/api/todos/${encodeURIComponent(todo.id)}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    if (!res.ok) throw new Error(`PATCH /api/todos/${todo.id} failed: ${res.status}`);
-    const saved = await res.json();
-    todos = todos.map((t) => (t.id === saved.id ? saved : t));
-    render();
-    clearError();
-  } catch (err) {
-    console.error(err);
-    render();
-    showError('Could not save');
-  }
-  focusIn(todo.id, 'input[type="checkbox"]');
+  await patchTodo(todo, { text }, 'Could not save');
 }
 
 // render() replaces the list, so put focus back on the matching control of a todo.
@@ -106,13 +90,13 @@ function focusIn(id, selector) {
   li?.querySelector(selector)?.focus();
 }
 
-// Save the new state; the page re-renders from the stored todo, or from the old one on failure.
-async function setDone(todo, done) {
+// Save the changes; the page re-renders from the stored todo, or from the old one on failure.
+async function patchTodo(todo, changes, failMessage) {
   try {
     const res = await fetch(`/api/todos/${encodeURIComponent(todo.id)}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ done }),
+      body: JSON.stringify(changes),
     });
     if (!res.ok) throw new Error(`PATCH /api/todos/${todo.id} failed: ${res.status}`);
     const saved = await res.json();
@@ -122,9 +106,13 @@ async function setDone(todo, done) {
   } catch (err) {
     console.error(err);
     render();
-    showError('Could not update todo');
+    showError(failMessage);
   }
   focusIn(todo.id, 'input[type="checkbox"]');
+}
+
+function setDone(todo, done) {
+  return patchTodo(todo, { done }, 'Could not update todo');
 }
 
 // Remove the todo once the server confirms; 404 means it is already gone, so drop it too.
