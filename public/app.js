@@ -8,9 +8,13 @@ const countMessage = document.getElementById('todo-count');
 const emptyMessage = document.getElementById('empty-message');
 const clearButton = document.getElementById('clear-completed');
 const list = document.getElementById('todo-list');
+const filterButtons = /** @type {HTMLElement[]} */ ([...document.querySelectorAll('[data-filter]')]);
+const FILTER_HASHES = { all: '#/', active: '#/active', done: '#/done' };
 
 let todos = [];
 let editingId = null;
+// The selected filter ('all', 'active' or 'done'); always derived from the URL hash.
+let filter = 'all';
 // Texts being saved (todo id to text), shown until the server answers.
 const pendingTexts = new Map();
 // True while render() swaps the list: the blur from removing a focused field is not the user clicking away.
@@ -177,10 +181,22 @@ async function clearCompleted() {
   input.focus();
 }
 
+function filterFromHash() {
+  if (location.hash === FILTER_HASHES.active) return 'active';
+  if (location.hash === FILTER_HASHES.done) return 'done';
+  return 'all';
+}
+
+function visibleTodos() {
+  if (filter === 'active') return todos.filter((t) => !t.done);
+  if (filter === 'done') return todos.filter((t) => t.done);
+  return todos;
+}
+
 function render() {
   const draft = openEditDraft();
   rendering = true;
-  list.replaceChildren(...todos.map(renderTodo));
+  list.replaceChildren(...visibleTodos().map(renderTodo));
   rendering = false;
   if (draft) restoreEditDraft(draft);
   list.hidden = todos.length === 0;
@@ -188,6 +204,7 @@ function render() {
   countMessage.textContent = `${todos.filter((t) => !t.done).length} items left`;
   countMessage.hidden = false;
   clearButton.hidden = !todos.some((t) => t.done);
+  for (const button of filterButtons) button.setAttribute('aria-pressed', String(button.dataset.filter === filter));
 }
 
 // What the user has typed in the open edit field, so a re-render does not throw it away.
@@ -220,9 +237,21 @@ async function fetchTodos() {
 }
 
 async function load() {
+  filter = filterFromHash();
   todos = await fetchTodos();
   render();
 }
+
+for (const button of filterButtons) {
+  button.addEventListener('click', () => {
+    location.hash = FILTER_HASHES[button.dataset.filter];
+  });
+}
+
+window.addEventListener('hashchange', () => {
+  filter = filterFromHash();
+  render();
+});
 
 clearButton.addEventListener('click', clearCompleted);
 
