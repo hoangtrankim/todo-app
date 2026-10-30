@@ -269,3 +269,20 @@ test('DELETE /api/todos without exactly done=true returns 400 and deletes nothin
   }
   expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual(entries);
 });
+
+test('PATCH with bad done and good text returns 400 and changes nothing', async ({ request }) => {
+  const entries = [{ id: 'a', text: 'Buy milk', done: false }];
+  await writeFile(TODOS_FILE, JSON.stringify(entries));
+  const res = await request.patch('/api/todos/a', { data: { text: 'x', done: 'yes' } });
+  expect(res.status()).toBe(400);
+  expect(await res.json()).toEqual({ error: 'done must be true or false' });
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual(entries);
+});
+
+test('PATCH with text and done changes both fields in one request', async ({ request }) => {
+  await writeFile(TODOS_FILE, JSON.stringify([{ id: 'a', text: 'Buy milk', done: false }]));
+  const res = await request.patch('/api/todos/a', { data: { text: 'x', done: true } });
+  expect(res.status()).toBe(200);
+  expect(await res.json()).toEqual({ id: 'a', text: 'x', done: true });
+  expect(await (await request.get('/api/todos')).json()).toEqual([{ id: 'a', text: 'x', done: true }]);
+});
