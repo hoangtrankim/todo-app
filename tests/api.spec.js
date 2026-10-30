@@ -11,9 +11,9 @@ test.beforeEach(async () => {
 });
 
 test('unsupported method returns 405 with an allow header', async ({ request }) => {
-  const res = await request.delete('/api/todos');
+  const res = await request.put('/api/todos');
   expect(res.status()).toBe(405);
-  expect(res.headers()['allow']).toBe('GET, POST');
+  expect(res.headers()['allow']).toBe('GET, POST, DELETE');
 });
 
 // A Buffer is sent as-is; a string with a JSON content-type would be re-encoded by Playwright.
@@ -229,4 +229,29 @@ test('GET skips malformed entries', async ({ request }) => {
     JSON.stringify([good, { id: 2, text: 'bad', done: false }, { id: '3', text: 'x' }, null]),
   );
   expect(await (await request.get('/api/todos')).json()).toEqual([good]);
+});
+
+test('DELETE ?done=true removes only done todos and keeps malformed entries', async ({ request }) => {
+  const entries = [
+    { id: 'a', text: 'A', done: true },
+    { id: 'b', text: 'B', done: false },
+    null,
+    { id: 'c', text: 'C', done: true },
+  ];
+  await writeFile(TODOS_FILE, JSON.stringify(entries));
+  const res = await request.delete('/api/todos?done=true');
+  expect(res.status()).toBe(200);
+  expect(await res.json()).toEqual({ removed: 2 });
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual([entries[1], null]);
+});
+
+test('DELETE /api/todos without exactly done=true returns 400 and deletes nothing', async ({ request }) => {
+  const entries = [{ id: 'a', text: 'A', done: true }];
+  await writeFile(TODOS_FILE, JSON.stringify(entries));
+  for (const query of ['', '?done=false', '?done=true&done=true', '?done=true&x=1']) {
+    const res = await request.delete(`/api/todos${query}`);
+    expect(res.status(), query).toBe(400);
+    expect(await res.json()).toEqual({ error: 'Only done=true is supported' });
+  }
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual(entries);
 });

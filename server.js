@@ -115,7 +115,21 @@ async function handleTodos(req, res) {
     await updateTodos((todos) => todos.push(todo));
     return sendJson(res, 201, todo);
   }
-  sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'GET, POST' });
+  if (req.method === 'DELETE') {
+    // The body is never read. Only an explicit done=true clears; a bare DELETE never wipes the list.
+    const { searchParams } = new URL(req.url ?? '/', 'http://x');
+    if (searchParams.size !== 1 || searchParams.getAll('done').join() !== 'true') {
+      throw new HttpError(400, 'Only done=true is supported');
+    }
+    const removed = await updateTodos((todos) => {
+      const kept = todos.filter((t) => !(isTodo(t) && t.done));
+      const count = todos.length - kept.length;
+      todos.splice(0, todos.length, ...kept);
+      return count;
+    });
+    return sendJson(res, 200, { removed });
+  }
+  sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'GET, POST, DELETE' });
 }
 
 // The file is hand-editable, so skip entries that are not well-formed todos.

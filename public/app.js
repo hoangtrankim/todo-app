@@ -6,6 +6,7 @@ const input = /** @type {HTMLInputElement} */ (document.getElementById('new-todo
 const errorBox = document.getElementById('todo-error');
 const countMessage = document.getElementById('todo-count');
 const emptyMessage = document.getElementById('empty-message');
+const clearButton = document.getElementById('clear-completed');
 const list = document.getElementById('todo-list');
 
 let todos = [];
@@ -83,12 +84,29 @@ async function deleteTodo(todo) {
   else input.focus();
 }
 
+// Drop the done todos once the server confirms; on failure the list stays as it is.
+async function clearCompleted() {
+  try {
+    const res = await fetch('/api/todos?done=true', { method: 'DELETE' });
+    if (!res.ok) throw new Error(`DELETE /api/todos?done=true failed: ${res.status}`);
+  } catch (err) {
+    console.error(err);
+    showError('Could not clear completed todos');
+    return;
+  }
+  todos = todos.filter((t) => !t.done);
+  render();
+  clearError();
+  input.focus();
+}
+
 function render() {
   list.replaceChildren(...todos.map(renderTodo));
   list.hidden = todos.length === 0;
   emptyMessage.hidden = todos.length !== 0;
   countMessage.textContent = `${todos.filter((t) => !t.done).length} items left`;
   countMessage.hidden = false;
+  clearButton.hidden = !todos.some((t) => t.done);
 }
 
 function showError(message) {
@@ -107,6 +125,8 @@ async function load() {
   todos = await res.json();
   render();
 }
+
+clearButton.addEventListener('click', clearCompleted);
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
