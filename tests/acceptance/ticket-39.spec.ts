@@ -98,6 +98,6 @@ test('AC-2: saving unchanged text clears an earlier empty-text error', async ({ 
   await edit(page).fill('  Alpha ');
   await edit(page).press('Enter');
   await expect(edit(page)).toHaveCount(0);
-  await expect(page.getByRole('alert')).toBeEmpty();
+  await expect(page.locator('#todo-error')).toHaveText('');
   await expect(list(page).getByText('Alpha', { exact: true })).toBeVisible();
 });
