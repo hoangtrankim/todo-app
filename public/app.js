@@ -76,6 +76,12 @@ async function saveEdit(todo, value) {
   if (editingId !== todo.id) return;
   editingId = null;
   const text = value.trim();
+  if (!text) {
+    render();
+    showError(EMPTY_ERROR);
+    focusIn(todo.id, 'input[type="checkbox"]');
+    return;
+  }
   if (text === todo.text) {
     render();
     focusIn(todo.id, 'input[type="checkbox"]');
