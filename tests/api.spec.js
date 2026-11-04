@@ -287,7 +287,7 @@ test('PATCH with text and done changes both fields in one request', async ({ req
   expect(await (await request.get('/api/todos')).json()).toEqual([{ id: 'a', text: 'x', done: true }]);
 });
 
-test('bulk PATCH leaves a malformed storage entry untouched and does not return it', async ({ request }) => {
+test('AC-12: bulk PATCH leaves a malformed storage entry untouched and does not return it', async ({ request }) => {
   const malformed = { id: 5, text: 'x' };
   await writeFile(
     TODOS_FILE,
