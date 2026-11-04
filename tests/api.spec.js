@@ -291,12 +291,7 @@ test('AC-12: bulk PATCH leaves a malformed storage entry untouched and does not 
   const malformed = { id: 5, text: 'x' };
   await writeFile(
     TODOS_FILE,
-    JSON.stringify([
-      { id: 'a', text: 'One', done: false },
-      malformed,
-      'junk',
-      { id: 'b', text: 'Two', done: false },
-    ]),
+    JSON.stringify([{ id: 'a', text: 'One', done: false }, malformed, 'junk', { id: 'b', text: 'Two', done: false }]),
   );
   const res = await request.patch('/api/todos', { data: { done: true } });
   expect(res.status()).toBe(200);
