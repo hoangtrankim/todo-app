@@ -115,6 +115,16 @@ async function handleTodos(req, res) {
     await updateTodos((todos) => todos.push(todo));
     return sendJson(res, 201, todo);
   }
+  if (req.method === 'PATCH') {
+    const { done } = await readJsonObject(req);
+    if (typeof done !== 'boolean') throw new HttpError(400, 'done must be true or false');
+    const updated = await updateTodos((todos) => {
+      const valid = todos.filter(isTodo);
+      for (const t of valid) t.done = done;
+      return valid;
+    });
+    return sendJson(res, 200, updated);
+  }
   if (req.method === 'DELETE') {
     // The body is never read. Only an explicit done=true clears; a bare DELETE never wipes the list.
     const { searchParams } = new URL(req.url ?? '/', 'http://x');
@@ -129,7 +139,7 @@ async function handleTodos(req, res) {
     });
     return sendJson(res, 200, { removed });
   }
-  sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'GET, POST, DELETE' });
+  sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'GET, POST, PATCH, DELETE' });
 }
 
 // The file is hand-editable, so skip entries that are not well-formed todos.

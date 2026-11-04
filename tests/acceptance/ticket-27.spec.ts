@@ -210,7 +210,7 @@ test.describe('API', () => {
   }) => {
     const res = await request.put('/api/todos');
     expect(res.status()).toBe(405);
-    expect(res.headers()['allow']).toBe('GET, POST, DELETE');
+    expect(res.headers()['allow']).toBe('GET, POST, PATCH, DELETE');
   });
 
   test('AC-1: DELETE /api/todos/:id still removes a single todo', async ({ request }) => {
