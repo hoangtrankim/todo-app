@@ -286,3 +286,28 @@ test('PATCH with text and done changes both fields in one request', async ({ req
   expect(await res.json()).toEqual({ id: 'a', text: 'x', done: true });
   expect(await (await request.get('/api/todos')).json()).toEqual([{ id: 'a', text: 'x', done: true }]);
 });
+
+test('bulk PATCH leaves a malformed storage entry untouched and does not return it', async ({ request }) => {
+  const malformed = { id: 5, text: 'x' };
+  await writeFile(
+    TODOS_FILE,
+    JSON.stringify([
+      { id: 'a', text: 'One', done: false },
+      malformed,
+      'junk',
+      { id: 'b', text: 'Two', done: false },
+    ]),
+  );
+  const res = await request.patch('/api/todos', { data: { done: true } });
+  expect(res.status()).toBe(200);
+  expect(await res.json()).toEqual([
+    { id: 'a', text: 'One', done: true },
+    { id: 'b', text: 'Two', done: true },
+  ]);
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual([
+    { id: 'a', text: 'One', done: true },
+    malformed,
+    'junk',
+    { id: 'b', text: 'Two', done: true },
+  ]);
+});
