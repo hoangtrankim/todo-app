@@ -5,7 +5,7 @@ A sample app built end to end by the system factory (https://github.com/hoangtra
 - Plain Node, no framework: `server.js` serves `public/`. Keep it that way unless a design note says otherwise.
 - House design patterns live in `docs/patterns.md`. Follow the ones the design note names; change the catalog only as a design note says.
 - Tests are Playwright, in `tests/`. Acceptance tests from the QA test writer live in `tests/acceptance/` and are never edited by the builder.
-- Run `npm run check` before pushing: lint (ESLint), format (Prettier, `npm run format` fixes it), types (`tsc --checkJs`) and the tests with an 80% line coverage floor on `server.js`. CI runs the same gates and fails the PR on any of them. `PORT` sets the server port.
+- Run `npm run check` before pushing: lint (ESLint), format (Prettier, `npm run format` fixes it), types (`tsc --checkJs`) and the tests with an 80% line coverage floor on `server.js`. CI runs the same gates and fails the PR on any of them. `PORT` sets the server port. One test file: `CI=1 npx playwright test tests/acceptance/ticket-N.spec.ts`.
 - Acceptance tests in `tests/acceptance/` are left out of lint and format, so the builder never has to touch them.
 - The factory CLI is `forge` from forge-cloud, installed globally: on the Mac, `npm ci && npm run build && npm link` in a forge-cloud clone; in a cloud session the `forge-loop` skill builds it. Never link system-factory: its forge has no `forge steps`. Don't install forge into this repo's `node_modules`: `npm ci` wipes it mid-run.
 - To run the factory from a Claude session, use the `forge-loop` skill. The session runs the agents; `.github/workflows/forge-gate.yml` (`forge merge-gate`, as the forge-bot App) is the only thing that merges.

@@ -1,4 +1,16 @@
 {
+  "permissions": {
+    "deny": [
+      "Bash(forge merge*)",
+      "Bash(forge dispatch*)",
+      "Bash(* --as owner*)",
+      "Bash(* --as system*)",
+      "Bash(gh pr merge*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push origin main*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -6,7 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "forge guard"
+            "command": "command -v forge >/dev/null 2>&1 && exec forge guard; grep -qE '\"agent_type\" *: *\"factory-(reviewer|security)\"' && { echo \"Blocked: forge is not installed, so the factory guard cannot check this read-only agent.\" >&2; exit 2; }; exit 0",
+            "onFailure": "block"
           }
         ]
       }
