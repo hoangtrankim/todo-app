@@ -6,6 +6,7 @@ const input = /** @type {HTMLInputElement} */ (document.getElementById('new-todo
 const errorBox = document.getElementById('todo-error');
 const countMessage = document.getElementById('todo-count');
 const emptyMessage = document.getElementById('empty-message');
+const toggleAllButton = document.getElementById('toggle-all');
 const clearButton = document.getElementById('clear-completed');
 const list = document.getElementById('todo-list');
 const filterButtons = /** @type {HTMLElement[]} */ ([...document.querySelectorAll('[data-filter]')]);
@@ -181,6 +182,26 @@ async function clearCompleted() {
   input.focus();
 }
 
+// Mark every todo done (or, if all are done, not done); on failure the list stays as it is.
+async function toggleAll() {
+  const done = todos.some((t) => !t.done);
+  try {
+    const res = await fetch('/api/todos', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ done }),
+    });
+    if (!res.ok) throw new Error(`PATCH /api/todos failed: ${res.status}`);
+    todos = await res.json();
+  } catch (err) {
+    console.error(err);
+    showError('Could not update todo');
+    return;
+  }
+  render();
+  clearError();
+}
+
 function filterFromHash() {
   if (location.hash === FILTER_HASHES.active) return 'active';
   if (location.hash === FILTER_HASHES.done) return 'done';
@@ -204,6 +225,8 @@ function render() {
   emptyMessage.textContent = todos.length === 0 ? 'No todos yet' : '';
   countMessage.textContent = `${todos.filter((t) => !t.done).length} items left`;
   countMessage.hidden = false;
+  toggleAllButton.hidden = todos.length === 0;
+  toggleAllButton.textContent = todos.some((t) => !t.done) ? 'Mark all as done' : 'Mark all as not done';
   clearButton.hidden = !todos.some((t) => t.done);
   for (const button of filterButtons) button.setAttribute('aria-pressed', String(button.dataset.filter === filter));
 }
@@ -254,6 +277,7 @@ window.addEventListener('hashchange', () => {
   render();
 });
 
+toggleAllButton.addEventListener('click', toggleAll);
 clearButton.addEventListener('click', clearCompleted);
 
 form.addEventListener('submit', async (event) => {
