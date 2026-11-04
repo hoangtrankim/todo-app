@@ -13,7 +13,7 @@ test.beforeEach(async () => {
 test('unsupported method returns 405 with an allow header', async ({ request }) => {
   const res = await request.put('/api/todos');
   expect(res.status()).toBe(405);
-  expect(res.headers()['allow']).toBe('GET, POST, DELETE');
+  expect(res.headers()['allow']).toBe('GET, POST, PATCH, DELETE');
 });
 
 // A Buffer is sent as-is; a string with a JSON content-type would be re-encoded by Playwright.
