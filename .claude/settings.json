@@ -8,7 +8,10 @@
       "Bash(gh pr merge*)",
       "Bash(git push --force*)",
       "Bash(git push -f*)",
-      "Bash(git push origin main*)"
+      "Bash(git push origin main*)",
+      "Bash(gh pr edit*)",
+      "Bash(gh issue edit*)",
+      "Bash(gh api *labels*)"
     ]
   },
   "hooks": {
