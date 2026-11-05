@@ -2,6 +2,8 @@
 
 A sample todo app built by the [system factory](https://github.com/hoangtrankim/system-factory). It is the factory's first target and its retro benchmark.
 
+The factory now runs from [forge-cloud](https://github.com/hoangtrankim/forge-cloud): a Claude Code session in this folder runs the agents when you say "run the factory" (the `forge-loop` skill), and `.github/workflows/forge-gate.yml` merges green, reviewed PRs as the forge-bot App. Install `forge` from a forge-cloud clone (`npm ci && npm run build && npm link`), never from system-factory and never into this repo's `node_modules`. See [CLAUDE.md](CLAUDE.md) for the details.
+
 ```sh
 npm install
 npm start      # http://localhost:3000
