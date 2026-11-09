@@ -1,0 +1,2 @@
+{"at":"2026-11-09T08:25:25.555Z","kind":"merge","ticket":65,"role":"system"}
+{"at":"2026-11-09T08:25:29.591Z","kind":"move","ticket":65,"role":"system","from":"in-qa","to":"done","round":2,"escalated":false}
