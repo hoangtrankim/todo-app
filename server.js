@@ -113,6 +113,24 @@ function readTodoText(value) {
   return text;
 }
 
+function clearCompleted() {
+  return updateTodos((todos) => {
+    const kept = todos.filter((t) => !(isTodo(t) && t.done));
+    const count = todos.length - kept.length;
+    todos.splice(0, todos.length, ...kept);
+    return count;
+  });
+}
+
+// Also drops hand-edited malformed entries: "all" means the file ends up empty.
+function clearAll() {
+  return updateTodos((todos) => {
+    const count = todos.length;
+    todos.length = 0;
+    return count;
+  });
+}
+
 async function handleTodos(req, res) {
   if (req.method === 'GET') {
     return sendJson(res, 200, (await readTodos()).filter(isTodo));
@@ -135,18 +153,16 @@ async function handleTodos(req, res) {
     return sendJson(res, 200, updated);
   }
   if (req.method === 'DELETE') {
-    // The body is never read. Only an explicit done=true clears; a bare DELETE never wipes the list.
+    // The body is never read. Only a lone done=true or all=true deletes; a bare DELETE never wipes the list.
     const { searchParams } = new URL(req.url ?? '/', 'http://x');
-    if (searchParams.size !== 1 || searchParams.getAll('done').join() !== 'true') {
-      throw new HttpError(400, 'Only done=true is supported');
+    const only = searchParams.size === 1;
+    if (only && searchParams.getAll('done').join() === 'true') {
+      return sendJson(res, 200, { removed: await clearCompleted() });
     }
-    const removed = await updateTodos((todos) => {
-      const kept = todos.filter((t) => !(isTodo(t) && t.done));
-      const count = todos.length - kept.length;
-      todos.splice(0, todos.length, ...kept);
-      return count;
-    });
-    return sendJson(res, 200, { removed });
+    if (only && searchParams.getAll('all').join() === 'true') {
+      return sendJson(res, 200, { removed: await clearAll() });
+    }
+    throw new HttpError(400, 'Only done=true is supported');
   }
   sendJson(res, 405, { error: 'Method not allowed' }, { allow: 'GET, POST, PATCH, DELETE' });
 }
