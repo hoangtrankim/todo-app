@@ -10,12 +10,17 @@ const countMessage = document.getElementById('todo-count');
 const emptyMessage = document.getElementById('empty-message');
 const toggleAllButton = document.getElementById('toggle-all');
 const clearButton = document.getElementById('clear-completed');
+const deleteAllButton = document.getElementById('delete-all');
+const confirmBox = document.getElementById('delete-all-confirm');
+const confirmMessage = document.getElementById('delete-all-message');
 const list = document.getElementById('todo-list');
 const filterButtons = /** @type {HTMLElement[]} */ ([...document.querySelectorAll('[data-filter]')]);
 const FILTER_HASHES = { all: '#/', active: '#/active', done: '#/done' };
 
 let todos = [];
 let editingId = null;
+// True while the Delete all confirmation is showing.
+let confirmingDeleteAll = false;
 // The selected filter ('all', 'active' or 'done'); always derived from the URL hash.
 let filter = 'all';
 // Texts being saved (todo id to text), shown until the server answers.
@@ -189,6 +194,37 @@ async function clearCompleted() {
   input.focus();
 }
 
+function openDeleteAll() {
+  confirmingDeleteAll = true;
+  render();
+  document.getElementById('delete-all-cancel').focus();
+}
+
+function closeDeleteAll() {
+  confirmingDeleteAll = false;
+  render();
+  deleteAllButton.focus();
+}
+
+// Delete every todo once the server confirms; on failure the list stays as it is.
+async function deleteAll() {
+  try {
+    const res = await fetch('/api/todos?all=true', { method: 'DELETE' });
+    if (!res.ok) throw new Error(`DELETE /api/todos?all=true failed: ${res.status}`);
+  } catch (err) {
+    console.error(err);
+    confirmingDeleteAll = false;
+    render();
+    showError('Could not delete all todos');
+    return;
+  }
+  todos = [];
+  confirmingDeleteAll = false;
+  render();
+  clearError();
+  input.focus();
+}
+
 // Mark every todo done (or, if all are done, not done); on failure the list stays as it is.
 async function toggleAll() {
   const done = todos.some((t) => !t.done);
@@ -234,6 +270,10 @@ function render() {
   countMessage.hidden = false;
   toggleAllButton.hidden = todos.length === 0;
   toggleAllButton.textContent = todos.some((t) => !t.done) ? 'Mark all as done' : 'Mark all as not done';
+  if (todos.length === 0) confirmingDeleteAll = false;
+  deleteAllButton.hidden = todos.length === 0 || confirmingDeleteAll;
+  confirmBox.hidden = !confirmingDeleteAll;
+  confirmMessage.textContent = `Delete all ${todos.length} todos? This cannot be undone.`;
   clearButton.hidden = !todos.some((t) => t.done);
   for (const button of filterButtons) button.setAttribute('aria-pressed', String(button.dataset.filter === filter));
 }
@@ -286,6 +326,9 @@ window.addEventListener('hashchange', () => {
 
 toggleAllButton.addEventListener('click', toggleAll);
 clearButton.addEventListener('click', clearCompleted);
+deleteAllButton.addEventListener('click', openDeleteAll);
+document.getElementById('delete-all-cancel').addEventListener('click', closeDeleteAll);
+document.getElementById('delete-all-yes').addEventListener('click', deleteAll);
 
 input.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {

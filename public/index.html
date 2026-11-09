@@ -32,6 +32,12 @@
         <button type="button" data-filter="active" aria-pressed="false">Active</button>
         <button type="button" data-filter="done" aria-pressed="false">Done</button>
       </div>
+      <button type="button" id="delete-all" hidden>Delete all</button>
+      <div id="delete-all-confirm" role="alertdialog" aria-label="Confirm delete all" hidden>
+        <p id="delete-all-message"></p>
+        <button type="button" id="delete-all-yes">Delete all</button>
+        <button type="button" id="delete-all-cancel">Cancel</button>
+      </div>
       <p id="empty-message" hidden></p>
       <ul id="todo-list" aria-label="Todos" hidden></ul>
     </main>
