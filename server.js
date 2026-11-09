@@ -10,6 +10,8 @@ const root = join(appDir, 'public');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const MAX_BODY = 10 * 1024;
 const EMPTY_ERROR = "Todo can't be empty";
+const MAX_TEXT = 200;
+const LONG_ERROR = `Todo text must be ${MAX_TEXT} characters or fewer`;
 
 function todosFile() {
   return resolve(appDir, process.env.TODOS_FILE ?? join('data', 'todos.json'));
@@ -103,14 +105,21 @@ async function readJsonObject(req) {
   return body;
 }
 
+// Trimmed todo text; refuses empty text first, then text over MAX_TEXT characters.
+function readTodoText(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) throw new HttpError(400, EMPTY_ERROR);
+  if (text.length > MAX_TEXT) throw new HttpError(400, LONG_ERROR);
+  return text;
+}
+
 async function handleTodos(req, res) {
   if (req.method === 'GET') {
     return sendJson(res, 200, (await readTodos()).filter(isTodo));
   }
   if (req.method === 'POST') {
     const body = await readJsonObject(req);
-    const text = typeof body.text === 'string' ? body.text.trim() : '';
-    if (!text) throw new HttpError(400, EMPTY_ERROR);
+    const text = readTodoText(body.text);
     const todo = { id: randomUUID(), text, done: false };
     await updateTodos((todos) => todos.push(todo));
     return sendJson(res, 201, todo);
@@ -157,9 +166,7 @@ function isTodo(t) {
 function readTodoChanges(body) {
   const changes = {};
   if ('text' in body) {
-    const text = typeof body.text === 'string' ? body.text.trim() : '';
-    if (!text) throw new HttpError(400, EMPTY_ERROR);
-    changes.text = text;
+    changes.text = readTodoText(body.text);
   }
   if ('done' in body || !('text' in body)) {
     if (typeof body.done !== 'boolean') throw new HttpError(400, 'done must be true or false');
