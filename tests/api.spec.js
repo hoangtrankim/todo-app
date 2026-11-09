@@ -306,3 +306,51 @@ test('AC-12: bulk PATCH leaves a malformed storage entry untouched and does not 
     { id: 'b', text: 'Two', done: true },
   ]);
 });
+
+const LONG_ERROR = 'Todo text must be 200 characters or fewer';
+
+test('PATCH with long text and done together changes nothing', async ({ request }) => {
+  const stored = [{ id: 'a', text: 'Buy milk', done: false }];
+  await writeFile(TODOS_FILE, JSON.stringify(stored));
+  const res = await request.patch('/api/todos/a', { data: { text: 'x'.repeat(201), done: true } });
+  expect(res.status()).toBe(400);
+  expect(await res.json()).toEqual({ error: LONG_ERROR });
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual(stored);
+});
+
+test('a stored todo over 200 characters can still be toggled', async ({ request }) => {
+  const text = 'x'.repeat(250);
+  await writeFile(TODOS_FILE, JSON.stringify([{ id: 'a', text, done: false }]));
+  const res = await request.patch('/api/todos/a', { data: { done: true } });
+  expect(res.status()).toBe(200);
+  expect(await res.json()).toEqual({ id: 'a', text, done: true });
+});
+
+test('saving an edit over 200 characters shows the server message and keeps the old text', async ({ page }) => {
+  const stored = [{ id: 'a', text: 'Buy milk', done: false }];
+  await writeFile(TODOS_FILE, JSON.stringify(stored));
+  await page.goto('/');
+  await page.getByText('Buy milk').dblclick();
+  const edit = page.getByRole('textbox', { name: 'Edit todo' });
+  await edit.fill('x'.repeat(201));
+  await edit.press('Enter');
+  await expect(page.getByRole('alert')).toHaveText(LONG_ERROR);
+  await expect(page.getByText('Buy milk')).toBeVisible();
+  expect(JSON.parse(await readFile(TODOS_FILE, 'utf8'))).toEqual(stored);
+});
+
+test('a 400 without an error message falls back to Could not save', async ({ page }) => {
+  await writeFile(TODOS_FILE, JSON.stringify([{ id: 'a', text: 'Buy milk', done: false }]));
+  await page.route('**/api/todos/*', (route) =>
+    route.request().method() === 'PATCH'
+      ? route.fulfill({ status: 400, contentType: 'text/plain', body: 'bad' })
+      : route.continue(),
+  );
+  await page.goto('/');
+  await page.getByText('Buy milk').dblclick();
+  const edit = page.getByRole('textbox', { name: 'Edit todo' });
+  await edit.fill('Buy oat milk');
+  await edit.press('Enter');
+  await expect(page.getByRole('alert')).toHaveText('Could not save');
+  await expect(page.getByText('Buy milk')).toBeVisible();
+});

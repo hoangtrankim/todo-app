@@ -1,5 +1,7 @@
 // Todo list page: fetch, render, add. Text is always set with textContent (never innerHTML).
 const EMPTY_ERROR = "Todo can't be empty";
+const MAX_TEXT = 200;
+const LONG_ERROR = `Todo text must be ${MAX_TEXT} characters or fewer`;
 
 const form = document.getElementById('new-todo-form');
 const input = /** @type {HTMLInputElement} */ (document.getElementById('new-todo'));
@@ -118,6 +120,11 @@ async function patchTodo(todo, changes, failMessage) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(changes),
     });
+    if (res.status === 400) {
+      // A body that is not JSON falls back to the generic message on purpose.
+      const data = await res.json().catch(() => ({}));
+      failMessage = data.error ?? failMessage;
+    }
     if (!res.ok) throw new Error(`PATCH /api/todos/${todo.id} failed: ${res.status}`);
     const saved = await res.json();
     todos = todos.map((t) => (t.id === saved.id ? saved : t));
@@ -293,6 +300,10 @@ form.addEventListener('submit', async (event) => {
   const text = input.value.trim();
   if (!text) {
     showError(EMPTY_ERROR);
+    return;
+  }
+  if (text.length > MAX_TEXT) {
+    showError(LONG_ERROR);
     return;
   }
   let res;
