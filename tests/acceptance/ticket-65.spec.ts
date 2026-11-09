@@ -86,5 +86,5 @@ test('AC-6: the Add button also shows the message, and 200 characters is accepte
   await input.fill('r'.repeat(200));
   await page.getByRole('button', { name: 'Add' }).click();
   await expect(page.getByRole('list', { name: 'Todos' }).getByRole('listitem')).toHaveCount(3);
-  await expect(page.getByRole('alert')).not.toHaveText(MSG);
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
