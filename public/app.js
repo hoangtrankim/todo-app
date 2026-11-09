@@ -121,6 +121,7 @@ async function patchTodo(todo, changes, failMessage) {
       body: JSON.stringify(changes),
     });
     if (res.status === 400) {
+      // A body that is not JSON falls back to the generic message on purpose.
       const data = await res.json().catch(() => ({}));
       failMessage = data.error ?? failMessage;
     }
