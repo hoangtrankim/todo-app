@@ -1,0 +1,2 @@
+{"at":"2026-11-09T08:19:31.866Z","kind":"risk","ticket":65,"role":"system","risk":"medium"}
+{"at":"2026-11-09T08:19:35.601Z","kind":"move","ticket":65,"role":"system","from":"in-qa","to":"in-review","round":2,"escalated":false}
