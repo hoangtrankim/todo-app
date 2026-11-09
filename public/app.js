@@ -280,6 +280,14 @@ window.addEventListener('hashchange', () => {
 toggleAllButton.addEventListener('click', toggleAll);
 clearButton.addEventListener('click', clearCompleted);
 
+input.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    input.value = '';
+    clearError();
+  }
+});
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const text = input.value.trim();
