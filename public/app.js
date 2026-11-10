@@ -345,7 +345,7 @@ form.addEventListener('submit', async (event) => {
     showError(EMPTY_ERROR);
     return;
   }
-  if (text.length > MAX_TEXT) {
+  if ([...text].length > MAX_TEXT) {
     showError(LONG_ERROR);
     return;
   }
