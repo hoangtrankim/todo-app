@@ -357,3 +357,5 @@
 {"at":"2026-11-09T08:33:14.412Z","kind":"evidence","ticket":66,"role":"qa-reporter","file":"t66-AC-9--8f241-eps-every-todo-after-reload.png"}
 {"at":"2026-11-09T08:33:18.497Z","kind":"evidence","ticket":66,"role":"qa-reporter","file":"t66-results.json"}
 {"at":"2026-11-09T08:33:26.019Z","kind":"note","ticket":66,"role":"qa-reporter"}
+{"at":"2026-11-10T08:54:13.788Z","kind":"create","ticket":71,"role":"planner","to":"planned"}
+{"at":"2026-11-10T08:54:15.331Z","kind":"create","ticket":72,"role":"planner","to":"planned"}
