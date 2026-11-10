@@ -369,3 +369,6 @@
 {"at":"2026-11-10T09:05:01.401Z","kind":"note","ticket":71,"role":"qa-reporter"}
 {"at":"2026-11-10T09:05:43.718Z","kind":"move","ticket":72,"role":"designer","from":"planned","to":"designed","round":0,"escalated":false}
 {"at":"2026-11-10T09:06:40.290Z","kind":"mark","ticket":72,"role":"qa-writer"}
+{"at":"2026-11-10T09:07:07.387Z","kind":"move","ticket":72,"role":"builder","from":"designed","to":"building","round":0,"escalated":false}
+{"at":"2026-11-10T09:08:33.711Z","kind":"pr","ticket":72,"role":"builder"}
+{"at":"2026-11-10T09:11:51.313Z","kind":"move","ticket":72,"role":"builder","from":"building","to":"in-review","round":0,"escalated":false}
