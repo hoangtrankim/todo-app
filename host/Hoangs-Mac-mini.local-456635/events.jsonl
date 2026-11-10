@@ -367,3 +367,4 @@
 {"at":"2026-11-10T09:04:04.090Z","kind":"move","ticket":71,"role":"reviewer","from":"in-review","to":"in-qa","round":0,"escalated":false}
 {"at":"2026-11-10T09:04:54.223Z","kind":"evidence","ticket":71,"role":"qa-reporter","file":"results.json"}
 {"at":"2026-11-10T09:05:01.401Z","kind":"note","ticket":71,"role":"qa-reporter"}
+{"at":"2026-11-10T09:05:43.718Z","kind":"move","ticket":72,"role":"designer","from":"planned","to":"designed","round":0,"escalated":false}
