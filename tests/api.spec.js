@@ -354,3 +354,15 @@ test('a 400 without an error message falls back to Could not save', async ({ pag
   await expect(page.getByRole('alert')).toHaveText('Could not save');
   await expect(page.getByText('Buy milk')).toBeVisible();
 });
+
+// AC-12: Delete all only accepts exactly all=true; anything else is refused and deletes nothing.
+test('AC-12: DELETE with all other than exactly true returns 400 and deletes nothing', async ({ request }) => {
+  await request.post('/api/todos', { data: { text: 'Buy milk' } });
+  for (const query of ['?all=TRUE', '?all=1', '?all=false', '?all=', '?all=true&all=true', '?all=true&x=1']) {
+    const res = await request.delete(`/api/todos${query}`);
+    expect(res.status(), query).toBe(400);
+    expect(await res.json(), query).toEqual({ error: 'Only done=true is supported' });
+    const todos = await (await request.get('/api/todos')).json();
+    expect(todos.map((t) => t.text), query).toEqual(['Buy milk']);
+  }
+});
