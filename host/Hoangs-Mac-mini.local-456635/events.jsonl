@@ -359,3 +359,4 @@
 {"at":"2026-11-09T08:33:26.019Z","kind":"note","ticket":66,"role":"qa-reporter"}
 {"at":"2026-11-10T08:54:13.788Z","kind":"create","ticket":71,"role":"planner","to":"planned"}
 {"at":"2026-11-10T08:54:15.331Z","kind":"create","ticket":72,"role":"planner","to":"planned"}
+{"at":"2026-11-10T08:54:52.843Z","kind":"move","ticket":71,"role":"designer","from":"planned","to":"designed","round":0,"escalated":false}
