@@ -369,3 +369,19 @@ test('AC-12: DELETE with all other than exactly true returns 400 and deletes not
     ).toEqual(['Buy milk']);
   }
 });
+
+test('the text limit counts code points: 200 emoji are stored, 201 are refused', async ({ request }) => {
+  const emoji = '😀';
+  const created = await request.post('/api/todos', { data: { text: emoji.repeat(200) } });
+  expect(created.status()).toBe(201);
+  const todo = await created.json();
+  expect(todo.text).toBe(emoji.repeat(200));
+
+  const tooLong = await request.post('/api/todos', { data: { text: emoji.repeat(201) } });
+  expect(tooLong.status()).toBe(400);
+  const patched = await request.patch(`/api/todos/${todo.id}`, { data: { text: emoji.repeat(201) } });
+  expect(patched.status()).toBe(400);
+
+  const list = await (await request.get('/api/todos')).json();
+  expect(list).toEqual([todo]);
+});

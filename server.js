@@ -105,11 +105,11 @@ async function readJsonObject(req) {
   return body;
 }
 
-// Trimmed todo text; refuses empty text first, then text over MAX_TEXT characters.
+// Trimmed todo text; refuses empty text first, then text over MAX_TEXT code points.
 function readTodoText(value) {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text) throw new HttpError(400, EMPTY_ERROR);
-  if (text.length > MAX_TEXT) throw new HttpError(400, LONG_ERROR);
+  if ([...text].length > MAX_TEXT) throw new HttpError(400, LONG_ERROR);
   return text;
 }
 
