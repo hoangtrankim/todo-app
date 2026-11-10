@@ -363,6 +363,9 @@ test('AC-12: DELETE with all other than exactly true returns 400 and deletes not
     expect(res.status(), query).toBe(400);
     expect(await res.json(), query).toEqual({ error: 'Only done=true is supported' });
     const todos = await (await request.get('/api/todos')).json();
-    expect(todos.map((t) => t.text), query).toEqual(['Buy milk']);
+    expect(
+      todos.map((t) => t.text),
+      query,
+    ).toEqual(['Buy milk']);
   }
 });
