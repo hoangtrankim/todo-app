@@ -65,8 +65,8 @@ test('AC-2: Enter on the unchanged pending text closes the field and the new tex
   await expect(list(page).getByText('Alpha new', { exact: true })).toBeVisible();
   await expect(list(page).getByText('Alpha', { exact: true })).toHaveCount(0);
   await expect(edit(page)).toHaveCount(0);
-  const todos = await (await request.get('/api/todos')).json();
-  expect(todos[0].text).toBe('Alpha new');
+  // The released PATCH may still be on its way to the server, so wait for it to land.
+  await expect.poll(async () => (await (await request.get('/api/todos')).json())[0].text).toBe('Alpha new');
 });
 
 test('AC-2: click-away on the unchanged pending text closes the field and keeps the new text', async ({ page }) => {
