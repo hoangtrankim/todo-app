@@ -38,3 +38,4 @@
 {"at":"2026-11-10T08:55:00.938Z","ticket":71,"agent":"designer","rule":"design","ok":true,"durationMs":27938,"changed":true,"summary":"Designed #71: one api.spec.js test for refused all= queries, server.js untouched","by":"session"}
 {"at":"2026-11-10T08:55:37.598Z","ticket":71,"agent":"qa-writer","rule":"write-tests","ok":true,"durationMs":32598,"changed":true,"summary":"Added AC-12 all= refusal test to tests/api.spec.js; passes already, ticket tests-ready","by":"session"}
 {"at":"2026-11-10T09:02:46.445Z","ticket":71,"agent":"builder","rule":"start-build","ok":true,"durationMs":424445,"changed":true,"summary":"Opened PR #73 with the all=TRUE refusal test, Prettier fixed, check passes","by":"session"}
+{"at":"2026-11-10T09:04:16.303Z","ticket":71,"agent":"reviewer","rule":"review","ok":true,"durationMs":85303,"changed":true,"summary":"Passed #71 (PR #73), 280/280 tests; follow-up: seed a done todo too","by":"session"}

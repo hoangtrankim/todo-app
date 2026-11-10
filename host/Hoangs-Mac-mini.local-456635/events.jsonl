@@ -364,3 +364,4 @@
 {"at":"2026-11-10T08:55:56.526Z","kind":"move","ticket":71,"role":"builder","from":"designed","to":"building","round":0,"escalated":false}
 {"at":"2026-11-10T08:56:44.617Z","kind":"pr","ticket":71,"role":"builder"}
 {"at":"2026-11-10T09:02:39.346Z","kind":"move","ticket":71,"role":"builder","from":"building","to":"in-review","round":0,"escalated":false}
+{"at":"2026-11-10T09:04:04.090Z","kind":"move","ticket":71,"role":"reviewer","from":"in-review","to":"in-qa","round":0,"escalated":false}
