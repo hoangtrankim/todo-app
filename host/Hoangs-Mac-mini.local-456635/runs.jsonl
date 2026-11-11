@@ -48,3 +48,4 @@
 {"at":"2026-11-10T09:15:59.277Z","ticket":72,"agent":"qa-reporter","rule":"qa-report","ok":true,"durationMs":46277,"changed":true,"summary":"QA pass for #72 (PR #74), CI green at e7d2d27, evidence posted","by":"session"}
 {"at":"2026-11-11T03:09:34.808Z","ticket":63,"agent":"planner","rule":"close-spec","ok":true,"durationMs":34808,"changed":true,"summary":"Filed follow-up #75 (AC-12 test seeding); spec 63 stays open","by":"session"}
 {"at":"2026-11-11T03:10:10.697Z","ticket":75,"agent":"designer","rule":"design","ok":true,"durationMs":28697,"changed":true,"summary":"Design note for #75, moved to designed","by":"session"}
+{"at":"2026-11-11T03:10:57.057Z","ticket":75,"agent":"qa-writer","rule":"write-tests","ok":true,"durationMs":40057,"changed":true,"summary":"Refusal test seeds done+not-done todos; tests-ready","by":"session"}
