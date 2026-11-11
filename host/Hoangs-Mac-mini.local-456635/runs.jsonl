@@ -50,3 +50,4 @@
 {"at":"2026-11-11T03:10:10.697Z","ticket":75,"agent":"designer","rule":"design","ok":true,"durationMs":28697,"changed":true,"summary":"Design note for #75, moved to designed","by":"session"}
 {"at":"2026-11-11T03:10:57.057Z","ticket":75,"agent":"qa-writer","rule":"write-tests","ok":true,"durationMs":40057,"changed":true,"summary":"Refusal test seeds done+not-done todos; tests-ready","by":"session"}
 {"at":"2026-11-11T03:14:06.400Z","ticket":75,"agent":"builder","rule":"start-build","ok":true,"durationMs":183400,"changed":true,"summary":"PR #76 in review; no code change, CI green","by":"session"}
+{"at":"2026-11-11T03:15:30.040Z","ticket":75,"agent":"reviewer","rule":"review","ok":true,"durationMs":77040,"changed":true,"summary":"Pass: #75 PR #76; follow-up: add ?all=TRUE etc to test","by":"session"}
