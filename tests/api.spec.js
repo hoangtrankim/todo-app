@@ -260,9 +260,22 @@ test('DELETE ?done=true removes only done todos and keeps malformed entries', as
 });
 
 test('DELETE /api/todos without exactly done=true returns 400 and deletes nothing', async ({ request }) => {
-  const entries = [{ id: 'a', text: 'A', done: true }];
+  const entries = [
+    { id: 'a', text: 'A', done: true },
+    { id: 'b', text: 'B', done: false },
+  ];
   await writeFile(TODOS_FILE, JSON.stringify(entries));
-  for (const query of ['', '?done=false', '?done=true&done=true', '?done=true&x=1']) {
+  const queries = [
+    '',
+    '?done=false',
+    '?done=true&done=true',
+    '?done=true&x=1',
+    '?all=false',
+    '?all=',
+    '?all=1',
+    '?all=true&all=true',
+  ];
+  for (const query of queries) {
     const res = await request.delete(`/api/todos${query}`);
     expect(res.status(), query).toBe(400);
     expect(await res.json()).toEqual({ error: 'Only done=true is supported' });
