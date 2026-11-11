@@ -46,3 +46,4 @@
 {"at":"2026-11-10T09:13:27.437Z","ticket":72,"agent":"security","rule":"security-gate","ok":true,"durationMs":83437,"changed":true,"summary":"Security gate pass for #72 (PR #74), no findings","by":"session"}
 {"at":"2026-11-10T09:15:04.058Z","ticket":72,"agent":"reviewer","rule":"review","ok":true,"durationMs":92058,"changed":true,"summary":"Passed #72 (PR #74), 287/287 tests, no blocking findings","by":"session"}
 {"at":"2026-11-10T09:15:59.277Z","ticket":72,"agent":"qa-reporter","rule":"qa-report","ok":true,"durationMs":46277,"changed":true,"summary":"QA pass for #72 (PR #74), CI green at e7d2d27, evidence posted","by":"session"}
+{"at":"2026-11-11T03:09:34.808Z","ticket":63,"agent":"planner","rule":"close-spec","ok":true,"durationMs":34808,"changed":true,"summary":"Filed follow-up #75 (AC-12 test seeding); spec 63 stays open","by":"session"}

@@ -377,3 +377,4 @@
 {"at":"2026-11-10T09:15:41.792Z","kind":"evidence","ticket":72,"role":"qa-reporter","file":"test-finished-1.png"}
 {"at":"2026-11-10T09:15:45.911Z","kind":"evidence","ticket":72,"role":"qa-reporter","file":"results.json"}
 {"at":"2026-11-10T09:15:52.231Z","kind":"note","ticket":72,"role":"qa-reporter"}
+{"at":"2026-11-11T03:09:25.334Z","kind":"create","ticket":75,"role":"planner","to":"planned"}
